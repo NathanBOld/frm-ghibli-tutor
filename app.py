@@ -25,7 +25,7 @@ else:
 ai_client = genai.Client(api_key=GEMINI_API_KEY)
 
 # =========================================================
-# 🎨 2. ตั้งค่าธีมโฮมสเตย์กิบลิอบอุ่น (CSS เจาะระบบล็อก)
+# 🎨 2. ตั้งค่าธีมโฮมสเตย์กิบลิอบอุ่น (CSS)
 # =========================================================
 st.set_page_config(page_title="FRM Ghibli Central", page_icon="🌿", layout="wide")
 
@@ -105,7 +105,7 @@ global_pool = load_global_questions()
 # ⚙️ 4. บริหารกลไกตัวแปรระบบหลัก (Session State)
 # =========================================================
 if "my_flashcards" not in st.session_state:
-    st.session_state.my_flashcards = []
+    st.session_state.my_flashcards = [] # ตอนนี้จะเก็บเป็น List of Dicts: {"user":..., "front":..., "back":...}
 if "practice_idx" not in st.session_state:
     st.session_state.practice_idx = 0
 if "practice_submitted" not in st.session_state:
@@ -114,6 +114,8 @@ if "practice_chat" not in st.session_state:
     st.session_state.practice_chat = []
 if "global_stats_log" not in st.session_state:
     st.session_state.global_stats_log = []
+if "mock_scores_log" not in st.session_state:
+    st.session_state.mock_scores_log = [] # เก็บคะแนนเป็นรอบๆ สำหรับวาดกราฟเส้น
 
 # ตัวแปรสำหรับโหมดจำลองสอบ (Mock Exam)
 if "mock_questions" not in st.session_state:
@@ -128,34 +130,39 @@ if "mock_completed" not in st.session_state:
     st.session_state.mock_completed = False
 
 # =========================================================
-# 🧭 5. แผงควบคุมด้านข้างและระบบแยกชื่อรายบุคคล (Sidebar Navigation)
+# 🧭 5. แผงควบคุมด้านข้างและระบบแยกชื่อรายบุคคล
 # =========================================================
 with st.sidebar:
     st.title("🌿 Ghibli Control")
-    
     current_user = st.text_input("👤 ชื่อผู้ใช้งาน (User Name):", value="Nathan").strip()
     
     st.markdown("---")
     app_mode = st.radio("เลือกพื้นที่ทำงาน (Menu):", [
         "📝 Practice Mode", 
         "⏱️ Mock Exam Simulator", 
-        "📊 Performance & AI Insights"
+        "📊 Performance & AI Insights",
+        "🗂️ Flashcards Collection"
     ])
-    
-    st.markdown("---")
-    st.header("🗂️ Flashcards สะสมด่วน")
-    if st.session_state.my_flashcards:
-        for i, card in enumerate(st.session_state.my_flashcards):
-            st.info(f"📋 **Card {i+1}**\n{card}")
-    else:
-        st.caption("ยังไม่มีแฟลชการ์ดสะสมจ้า")
 
+# คำนวณคะแนนสะสมรายบุคคล
 user_history = [d for d in st.session_state.global_stats_log if d["user"] == current_user]
 user_correct_total = sum([d["is_correct"] for d in user_history])
 
+# 🏆 [ฟีเจอร์ที่กลับมา] แผงโชว์เกียรติยศตราประทับกิบลิ 3D บน Sidebar
 with st.sidebar:
     st.markdown("---")
-    st.metric(f"คะแนนสะสมของ {current_user}", f"{user_correct_total} ข้อ")
+    st.header("🏆 เกียรติยศนักวิเคราะห์")
+    st.metric(f"คะแนนสะสมความแม่นยำรวม", f"{user_correct_total} ข้อ")
+    
+    st.subheader("🏅 ตราประทับที่ปลดล็อก")
+    if user_correct_total >= 1:
+        st.markdown("🌰 **เมล็ดโอ๊ค Totoro** (นักวิเคราะห์ฝึกหัด)")
+    if user_correct_total >= 3:
+        st.markdown("🔥 **เปลวไฟ Calcifer** (สูตรคำนวณทรงพลัง)")
+    if user_correct_total >= 5:
+        st.markdown("🦦 **ราชาคาปิบาร่าออนเซ็น** (ปรมาจารย์ผู้บริหารความเสี่ยง)")
+    if user_correct_total == 0:
+        st.caption("เริ่มตอบถูกเพื่อปลดล็อกตราประทับกิบลิ 3D จ้า...")
 
 if not global_pool:
     st.warning("⚠️ ไม่พบข้อมูลโจทย์ในคลังข้อสอบคลาวด์ BigQuery กรุณาตรวจสอบการรันไฟล์ pipeline.py จ้า!")
@@ -193,7 +200,6 @@ else:
             st.info(f"Book: {q['book']} | Topic: {q['topic']} | Difficulty: {q['difficulty']}")
             st.write(q['question_text'])
             
-            # 🛠️ ปรับแก้ช้อยส์ D ให้สะอาด เที่ยงตรง ไม่มีอักษรส่วนเกินหลุดรอด
             opts = [
                 f"A: {q['options'].get('A','')}", 
                 f"B: {q['options'].get('B','')}", 
@@ -239,13 +245,23 @@ else:
             else:
                 st.caption("ข้อนี้ไม่มีศัพท์เทคนิคยากเพิ่มเติมจ้า")
                 
-            st.markdown('<div class="tool-card"><div class="tool-title">📝 บันทึกแฟลชการ์ดเข้ากล่องความจำ</div></div>', unsafe_allow_html=True)
-            txt_input = st.text_area("สรุปย่อหรือคัดสูตรเด็ดมาวางที่นี่เพื่อบันทึกไปที่บอร์ดซ้ายมือ:", key="note_area", placeholder="พิมพ์โน้ตส่วนตัว...")
-            if st.button("💾 เซฟแฟลชการ์ด (Save Card)"):
-                if txt_input.strip():
-                    st.session_state.my_flashcards.append(txt_input.strip())
-                    st.toast("บันทึกแฟลชการ์ดใบใหม่ขึ้นบอร์ดเรียบร้อยแล้วจ้า! 🌰")
+            # 🛠️ [อัปเกรด] หน้าสร้าง Flashcard แยกด้านหน้า-หลัง ชัดเจน
+            st.markdown('<div class="tool-card"><div class="tool-title">📝 สร้าง Flashcard เข้าคลังส่วนตัว</div></div>', unsafe_allow_html=True)
+            st.caption("💡 แฟลชการ์ดที่สร้างจะถูกส่งไปเก็บที่หน้าเมนู `🗂️ Flashcards Collection` ทางซ้ายมือจ้า")
+            fc_front = st.text_input("ด้านหน้าการ์ด (คำถาม / ชื่อสูตร):", key="fc_front", placeholder="เช่น สูตร CAPM")
+            fc_back = st.text_area("ด้านหลังการ์ด (คำอธิบาย / รายละเอียดสูตร):", key="fc_back", placeholder="เช่น E(R) = Rf + Beta(Rm - Rf)")
+            
+            if st.button("💾 เซฟแฟลชการ์ดลงคลัง (Save Card)"):
+                if fc_front.strip() and fc_back.strip():
+                    st.session_state.my_flashcards.append({
+                        "user": current_user,
+                        "front": fc_front.strip(),
+                        "back": fc_back.strip()
+                    })
+                    st.toast("บันทึกแฟลชการ์ดเรียบร้อย! ไปดูได้ที่หน้า Flashcards Collection จ้า 🌰")
                     st.rerun()
+                else:
+                    st.warning("⚠️ กรุณากรอกข้อมูลให้ครบทั้งด้านหน้าและด้านหลังก่อนกดบันทึกนะจ้า")
                     
             st.markdown('<div class="tool-card"><div class="tool-title">🧙‍♂️ ช่องแชทติวเตอร์เวทมนตร์ (AI Tutor)</div></div>', unsafe_allow_html=True)
             for m in st.session_state.practice_chat:
@@ -343,7 +359,19 @@ else:
                 
                 mock_logs.append({"Curriculum Book": mq['book'], "Your Pick": u_pick, "Correct Ans": mq['correct_option'], "Status": "✅ Correct" if is_correct else "❌ Incorrect"})
                 
-            st.metric("Total Score", f"{correct_count} / {len(st.session_state.mock_questions)} ข้อ", delta=f"Accuracy Rate: {int(correct_count/len(st.session_state.mock_questions)*100)}%")
+            final_accuracy = (correct_count / len(st.session_state.mock_questions)) * 100
+            
+            # บันทึกคะแนนแยกรายรอบสอบจำลองเพื่อใช้ทำกราฟเส้น
+            if not any(d.get('timestamp') == st.session_state.mock_start_time for d in st.session_state.mock_scores_log):
+                st.session_state.mock_scores_log.append({
+                    "user": current_user,
+                    "timestamp": st.session_state.mock_start_time,
+                    "total": len(st.session_state.mock_questions),
+                    "correct": correct_count,
+                    "accuracy": final_accuracy
+                })
+                
+            st.metric("Total Score", f"{correct_count} / {len(st.session_state.mock_questions)} ข้อ", delta=f"Accuracy Rate: {int(final_accuracy)}%")
             st.table(pd.DataFrame(mock_logs))
             
             if st.button("🔄 ล้างหน้าจอเพื่อเริ่มทำชุดข้อสอบใหม่ (Reset Mock)"):
@@ -353,7 +381,7 @@ else:
                 st.rerun()
 
     # =========================================================
-    # 📊 หน้าที่ 3: Performance & AI Insights (Radar + Progress Chart)
+    # 📊 หน้าที่ 3: Performance & AI Insights
     # =========================================================
     elif app_mode == "📊 Performance & AI Insights":
         st.header(f"📊 Performance Dashboard & AI Insights (ผู้ใช้งานปัจจุบัน: {current_user})")
@@ -372,9 +400,9 @@ else:
             
             col_graph1, col_graph2 = st.columns(2)
             
-            # 🕸️ 1. กราฟเรดาร์ (Radar Chart) แยกตามวิชาหลัก
+            # 🕸️ 1. กราฟเรดาร์ (Radar Chart) ขยาย Margin ไม่ให้ตัวอักษรตกขอบ
             with col_graph1:
-                st.markdown("#### 🕸️ Radar Chart Analysis (แยกตามหัวข้อวิชาหลัก)")
+                st.markdown("#### 🕸️ Radar Chart Analysis (ความแม่นยำรายวิชา)")
                 
                 all_4_books = ["Foundations of Risk Management", "Quantitative Analysis", "Financial Markets and Products", "Valuation and Risk Models"]
                 radar_data = []
@@ -387,30 +415,42 @@ else:
                 radar_df = pd.DataFrame(radar_data)
                 
                 fig_radar = px.line_polar(radar_df, r='Accuracy (%)', theta='Book', line_close=True,
-                                          title="อัตราความแม่นยำรายวิชา (%)",
                                           color_discrete_sequence=['#8F9E8B'])
                 fig_radar.update_traces(fill='toself')
-                fig_radar.update_layout(paper_bgcolor='rgba(0,0,0,0)')
+                # ล็อกเรนจ์ 0-100% ให้สมมาตร และขยายพื้นที่ให้ชื่อวิชาแสดงครบ
+                fig_radar.update_layout(
+                    polar=dict(radialaxis=dict(visible=True, range=[0, 100])),
+                    margin=dict(l=100, r=100, t=30, b=30), 
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    plot_bgcolor='rgba(0,0,0,0)'
+                )
                 st.plotly_chart(fig_radar, use_container_width=True)
                 
-            # 📈 2. กราฟความคืบหน้าของการทำข้อสอบแต่ละครั้ง (Progress Chart)
+            # 📈 2. กราฟเส้นความคืบหน้า (แสดงเป็น % ต่อรอบการสอบ Mock Exam)
             with col_graph2:
-                st.markdown("#### 📈 Cumulative Progress Chart (ความคืบหน้าแต่ละครั้ง)")
+                st.markdown("#### 📈 Mock Exam Progress (ผลงานแต่ละรอบจำลองสอบ)")
                 
-                df['Attempt Number'] = df.index + 1
-                df['Running Accuracy (%)'] = (df['is_correct'].expanding().mean() * 100).round(1)
+                user_mock_scores = [d for d in st.session_state.mock_scores_log if d["user"] == current_user]
+                if not user_mock_scores:
+                    st.info("💡 ยังไม่มีประวัติการสอบจำลอง (Mock Exam) ให้วาดกราฟจ้า ลองไปเทสต์ฝีมือในหน้า Mock Exam ดูนะครับ")
+                else:
+                    mock_df = pd.DataFrame(user_mock_scores).sort_values("timestamp").reset_index(drop=True)
+                    mock_df['Attempt Number'] = mock_df.index + 1
+                    
+                    fig_progress = px.line(mock_df, x='Attempt Number', y='accuracy',
+                                           labels={'Attempt Number': 'รอบการสอบ (Attempt)', 'accuracy': 'ความแม่นยำ (%)'},
+                                           markers=True, color_discrete_sequence=['#C87A7A'])
+                    # ล็อกแกน Y ที่ 0-105% เพื่อให้กราฟไม่ดูเหวี่ยงเกินจริง
+                    fig_progress.update_layout(
+                        yaxis=dict(range=[-5, 105]),
+                        margin=dict(l=40, r=40, t=30, b=30),
+                        paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)'
+                    )
+                    st.plotly_chart(fig_progress, use_container_width=True)
                 
-                fig_progress = px.line(df, x='Attempt Number', y='Running Accuracy (%)',
-                                       title="เส้นการพัฒนาความแม่นยำสะสมตามเวลาการส่งคำตอบ",
-                                       labels={'Attempt Number': 'จำนวนครั้งที่ทำข้อสอบ (Attempt)', 'Running Accuracy (%)': 'ความแม่นยำสะสม (%)'},
-                                       markers=True, color_discrete_sequence=['#C87A7A'])
-                fig_progress.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
-                st.plotly_chart(fig_progress, use_container_width=True)
-                
-            # 🧙‍♂️ แท่นวิเคราะห์จุดอ่อนดึงปัญญาประดิษฐ์ (AI Weakness Auditor)
+            # 🧙‍♂️ แท่นวิเคราะห์จุดอ่อนดึงปัญญาประดิษฐ์
             st.markdown("---")
             st.subheader("🧙‍♂️ AI Weakness Auditor (กล่องสรุปรายงานเฉพาะบุคคล)")
-            st.write(f"กดปุ่มด้านล่างเพื่อให้ AI ช่วยสแกนประวัติการทำข้อสอบทั้งหมดของ {current_user} และชี้เป้าจุดบกพร่องเชิงลึก")
             
             if st.button("✨ เจาะลึกแผนการอ่านหนังสือ (Generate AI Insights Report)"):
                 stats_text = ""
@@ -439,3 +479,23 @@ else:
                         st.markdown('</div>', unsafe_allow_html=True)
                     except Exception as e:
                         st.error(f"ระบบ AI ขัดข้องชั่วคราว: {e}")
+
+    # =========================================================
+    # 🗂️ หน้าที่ 4: Flashcards Collection (หน้าจอใหม่แยกเฉพาะทบทวนการ์ด)
+    # =========================================================
+    elif app_mode == "🗂️ Flashcards Collection":
+        st.header(f"🗂️ คลังแฟลชการ์ดส่วนตัวของ {current_user}")
+        st.caption("รวบรวมแฟลชการ์ดที่คุณบันทึกไว้จากโหมด Practice เพื่อเปิดอ่านทบทวนก่อนสอบ")
+        
+        # ดึงเฉพาะการ์ดที่ถูกสร้างมาในรูปแบบใหม่ (ดิกชันนารี) และตรงกับ User ปัจจุบัน
+        user_cards = [c for c in st.session_state.my_flashcards if type(c) is dict and c.get("user") == current_user]
+        
+        if not user_cards:
+            st.info("🍃 คุณยังไม่มีแฟลชการ์ดในคลังเลยจ้า สามารถไปสร้างการ์ดพร้อมพิมพ์เนื้อหาได้ที่หน้า `📝 Practice Mode` นะครับ")
+        else:
+            for idx, card in enumerate(user_cards):
+                # ใช้ระบบกล่อง Expander กดกาง-หุบ ได้เพื่อความสวยงาม
+                with st.expander(f"📌 การ์ดใบที่ {idx+1}: {card['front']}"):
+                    st.markdown(f"**💡 คำถาม/หัวข้อ (Front):**\n{card['front']}")
+                    st.markdown("---")
+                    st.markdown(f"**📖 คำตอบ/คำอธิบาย (Back):**\n{card['back']}")
