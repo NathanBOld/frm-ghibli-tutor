@@ -1,80 +1,89 @@
 import os
 import json
-import streamlit as st
+import time
 import random
+import streamlit as st
+import pandas as pd
+import plotly.express as px
 from google import genai
 from google.cloud import bigquery
 from google.oauth2 import service_account
 
 # =========================================================
-# 🔒 1. ระบบดึงกุญแจความลับและเชื่อมต่อ Cloud (คลาวด์เสถียร 100%)
+# 🔒 1. ระบบเชื่อมต่อ Cloud & Database (ยิงตรงผ่าน Memory)
 # =========================================================
 GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY"))
 
 if "GCP_JSON_TEXT" in st.secrets:
-    # 🚀 โหมดรันบนคลาวด์สาธารณะ: แปลงเนื้อหา JSON จากกล่องความลับมาใช้ผ่าน Memory ทันที ป้องกัน Read-only File System
     gcp_info = json.loads(st.secrets["GCP_JSON_TEXT"])
     credentials = service_account.Credentials.from_service_account_info(gcp_info)
     bq_client = bigquery.Client(credentials=credentials, project=gcp_info["project_id"])
 else:
-    # 💻 โหมดรันในเครื่องคอมตัวเอง: ดึงไฟล์กุญแจตามปกติ
     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "frm-ai-tutor-1cef93cd880b.json"
     bq_client = bigquery.Client()
 
 ai_client = genai.Client(api_key=GEMINI_API_KEY)
 
 # =========================================================
-# 🎨 2. ตั้งค่าธีมโฮมสเตย์กิบลิ & คาปิบาร่าสบายตา (Introvert WFH Vibe)
+# 🎨 2. ตั้งค่าธีมโฮมสเตย์กิบลิอบอุ่น (CSS เจาะระบบล็อก)
 # =========================================================
-st.set_page_config(page_title="FRM Ghibli Tutor", page_icon="🌿", layout="wide")
+st.set_page_config(page_title="FRM Ghibli Central", page_icon="🌿", layout="wide")
 
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;600&display=swap');
-    html, body, [class*="css"] {
+    [data-testid="stAppViewContainer"], [data-testid="stSidebar"], .stApp {
+        background-color: #FFFDF9 !important;
+        color: #4A3E3D !important;
         font-family: 'Sarabun', sans-serif;
-        background-color: #FFFDF9; /* สีขาวครีมโทนอบอุ่นแบบกระดาษกิบลิ */
-        color: #4A3E3D;
     }
     .stButton>button {
-        background-color: #8F9E8B; /* สีเขียวใบไม้สไตล์ป่า Totoro */
-        color: white;
-        border-radius: 12px;
-        border: none;
-        padding: 8px 20px;
+        background-color: #8F9E8B !important; 
+        color: white !important;
+        border-radius: 12px !important;
+        border: none !important;
+        padding: 8px 20px !important;
         transition: all 0.3s;
     }
     .stButton>button:hover {
-        background-color: #72826E;
+        background-color: #72826E !important;
         transform: translateY(-2px);
     }
-    .card-box {
-        background-color: #F4EFEA;
+    .tool-card {
+        background-color: #F4EFEA !important;
         padding: 18px;
-        border-radius: 16px;
-        border-left: 5px solid #D9C5B2;
+        border-radius: 14px;
+        border-left: 6px solid #8F9E8B;
+        margin-bottom: 20px;
+    }
+    .exam-timer {
+        font-size: 1.5rem;
+        font-weight: 600;
+        color: #C87A7A;
+        background-color: #FCEAEA;
+        padding: 10px;
+        border-radius: 10px;
+        text-align: center;
         margin-bottom: 15px;
     }
     </style>
 """, unsafe_allow_html=True)
 
 # =========================================================
-# 📊 3. ฟังก์ชันดึงคลังข้อสอบสไตล์ Business จาก BigQuery คลาวด์
+# 📊 3. ฟังก์ชันดึงคลังข้อสอบทั้งหมดจาก BigQuery Cloud
 # =========================================================
 @st.cache_data(show_spinner=False)
-def load_all_business_questions():
+def load_global_questions():
     table_id = "frm-ai-tutor.FRM_DATASET.questions"
     query = f"SELECT * FROM `{table_id}`"
     try:
         query_job = bq_client.query(query)
         rows = query_job.result()
-        questions = []
+        pool = []
         for row in rows:
-            # ทำการแปลงข้อความ JSON ที่จัดเก็บในคลาวด์กลับมาเป็นโครงสร้าง Python
             options_dict = json.loads(row.options) if isinstance(row.options, str) else row.options
             vocab_list = json.loads(row.key_vocabulary) if isinstance(row.key_vocabulary, str) else row.key_vocabulary
-            
-            questions.append({
+            pool.append({
                 "question_id": row.question_id,
                 "book": row.book,
                 "topic": row.topic,
@@ -86,184 +95,335 @@ def load_all_business_questions():
                 "explanation_th": row.explanation_th,
                 "key_vocabulary": vocab_list
             })
-        return questions
+        return pool
     except Exception as e:
-        st.error(f"ไม่สามารถเชื่อมต่อฐานข้อมูลหลักสูตรได้: {e}")
         return []
 
+global_pool = load_global_questions()
+
 # =========================================================
-# ⚙️ 4. บริหารกลไกตัวแปรระบบ (Session State Initialization)
+# ⚙️ 4. บริหารกลไกตัวแปรระบบหลัก (Session State)
 # =========================================================
-if "questions_pool" not in st.session_state:
-    st.session_state.questions_pool = load_all_business_questions()
-if "current_idx" not in st.session_state:
-    st.session_state.current_idx = 0
-if "user_choice" not in st.session_state:
-    st.session_state.user_choice = None
-if "is_submitted" not in st.session_state:
-    st.session_state.is_submitted = False
 if "my_flashcards" not in st.session_state:
     st.session_state.my_flashcards = []
-if "ai_chat_history" not in st.session_state:
-    st.session_state.ai_chat_history = []
-if "score_tracker" not in st.session_state:
-    st.session_state.score_tracker = 0
+if "practice_idx" not in st.session_state:
+    st.session_state.practice_idx = 0
+if "practice_submitted" not in st.session_state:
+    st.session_state.practice_submitted = False
+if "practice_chat" not in st.session_state:
+    st.session_state.practice_chat = []
+# ตัวเก็บสถิติเชิงลึกแยกรายวิชา
+if "stats_history" not in st.session_state:
+    st.session_state.stats_history = [] # เก็บ list ของ dict: {"book":..., "topic":..., "is_correct":...}
+
+# ตัวแปรสำหรับโหมดจำลองสอบ (Mock Exam)
+if "mock_questions" not in st.session_state:
+    st.session_state.mock_questions = []
+if "mock_user_answers" not in st.session_state:
+    st.session_state.mock_user_answers = {}
+if "mock_start_time" not in st.session_state:
+    st.session_state.mock_start_time = None
+if "mock_duration_minutes" not in st.session_state:
+    st.session_state.mock_duration_minutes = 30 # เวลาตั้งต้นสำหรับมินิม็อก 
+if "mock_completed" not in st.session_state:
+    st.session_state.mock_completed = False
 
 # =========================================================
-# 🏛️ 5. เลย์เอาต์หน้าต่างหลักและการแสดงผลแอปพลิเคชัน
+# 🧭 5. แผงควบคุมด้านข้างและเมนูสลับหน้า (Sidebar Navigation)
 # =========================================================
-st.title("🌿 FRM Part I - Ghibli Business Tutor 🌾")
-st.caption("ยินดีต้อนรับคุณนาธานสู่มุมทบทวนความเสี่ยงสไตล์สถาบันการเงินจริง โฟกัส เป๊ะ และเงียบสงบ 🦦🛖")
-
-# 🏆 แผงควบคุมด้านข้าง (Sidebar): บอร์ดสรุปคะแนนและคลังแฟลชการ์ดสะสม
 with st.sidebar:
-    st.header("🏆 เกียรติยศนักวิเคราะห์")
-    st.metric("คะแนนสะสมความแม่นยำ", f"{st.session_state.score_tracker} ข้อ")
-    
-    # 🏅 กลไกปลดล็อกเกียรติยศ 3D Badge สไตล์กิบลิ
-    st.subheader("🏅 ตราประทับที่ปลดล็อก")
-    if st.session_state.score_tracker >= 1:
-        st.markdown("🌰 **เมล็ดโอ๊ค Totoro** (นักวิเคราะห์ฝึกหัด)")
-    if st.session_state.score_tracker >= 3:
-        st.markdown("🔥 **เปลวไฟ Calcifer** (สูตรคำนวณทรงพลัง)")
-    if st.session_state.score_tracker >= 5:
-        st.markdown("🦦 **ราชาคาปิบาร่าออนเซ็น** (ปรมาจารย์ผู้บริหารความเสี่ยง)")
-    if st.session_state.score_tracker == 0:
-        st.caption("เริ่มตอบถูกครบเงื่อนไขเพื่อปลดล็อกตราประทับกิบลิ 3D จ้า...")
-        
-    st.markdown("---")
-    st.header("🗂️ กล่องแฟลชการ์ดจดจำด่วน")
-    if st.session_state.my_flashcards:
-        for idx, card in enumerate(st.session_state.my_flashcards):
-            st.info(f"📋 **ใบที่ {idx+1}**\n{card}")
-    else:
-        st.caption("ยังไม่มีการ์ดคำศัพท์หรือสูตรที่บันทึกไว้จ้า")
-
-# ตรวจสอบว่ามีโจทย์พร้อมใช้งานในตารางคลาวด์หรือไม่
-if not st.session_state.questions_pool:
-    st.warning("⚙️ ขณะนี้ระบบคลังโจทย์สไตล์ Business บน BigQuery ว่างเปล่า พรุ่งนี้เวลาบ่ายสองอย่าลืมเปิดรัน pipeline.py เพื่อปั๊มโจทย์เข้าฐานข้อมูลนะจ้า!")
-else:
-    # ดึงข้อมูลโจทย์ข้อปัจจุบันขึ้นมาแจกแจง
-    q = st.session_state.questions_pool[st.session_state.current_idx]
-    
-    # ส่วนหัวระบุพิกัดวิชาและระดับความยาก
-    st.markdown(f"**📖 เล่มหลักสูตร:** {q['book']} | **🎯 หัวข้อทดสอบ:** {q['topic']} | ⚡ **ระดับ:** {q['difficulty']}")
-    
-    # 📝 พื้นที่แสดงเนื้อหาโจทย์ข้อสอบหลัก (Institutional Banking context)
-    st.write(q['question_text'])
-    
-    # จัดแจงแปลงตัวเลือกข้อสอบออกเป็น Option Radio
-    options_list = [
-        f"A: {q['options'].get('A', '')}",
-        f"B: {q['options'].get('B', '')}",
-        f"C: {q['options'].get('C', '')}",
-        f"D: {q['options'].get('D', '')}"
-    ]
-    
-    # 🛠️ แก้ไขบรรทัดนี้: ลบ index=None และ placeholder ออก เปลี่ยนมาล็อกเริ่มต้นที่ตัวเลือกแรกสุด (index=0) เพื่อสยบบั๊ก Python 3.14
-    selected_radio = st.radio("เลือกคำตอบที่ถูกต้องที่สุดตามหลักปฏิบัติการเงิน:", options_list, index=0)
-    
-    col_btn1, col_btn2 = st.columns(2)
-    with col_btn1:
-        if st.button("🚀 ส่งตรวจคำตอบ", use_container_width=True) and selected_radio:
-            st.session_state.user_choice = selected_radio[0] # ดึงเฉพาะตัวอักษรหน้าสุด A, B, C, D
-            st.session_state.is_submitted = True
-            
-    with col_btn2:
-        if st.button("⏭️ สุ่มข้อถัดไป", use_container_width=True):
-            # รีเซ็ตสถานะตัวแปรเพื่อสลับไปข้อถัดไปแบบสุ่ม
-            st.session_state.current_idx = random.randint(0, len(st.session_state.questions_pool) - 1)
-            st.session_state.is_submitted = False
-            st.session_state.user_choice = None
-            st.session_state.ai_chat_history = []
-            st.rerun()
-
-    # แสดงแผงโพยคำเฉลยอย่างละเอียดเฉพาะเมื่อกดปุ่มตรวจคำตอบแล้วเท่านั้น
-    if st.session_state.is_submitted:
-        st.markdown("---")
-        if st.session_state.user_choice == q['correct_option']:
-            st.success(f"✨ มหัศจรรย์มากนาธาน! คำตอบของคุณถูกต้อง เฉลยคือข้อ {q['correct_option']} ครับจ้า!")
-            # เพิ่มคะแนนเมื่อตอบถูกเป็นครั้งแรกในรอบนั้น
-            if 'last_counted_id' not in st.session_state or st.session_state.last_counted_id != q['question_id']:
-                st.session_state.score_tracker += 1
-                st.session_state.last_counted_id = q['question_id']
-        else:
-            st.error(f"ลื่นล้มเล็กน้อยโฮมสเตย์กิบลิ! คำตอบที่เลือกคือ {st.session_state.user_choice} แต่คำตอบที่ถูกต้องตามหลักสูตรคือข้อ {q['correct_option']} จ้า")
-            
-        st.subheader("📖 Explanation (English)")
-        st.write(q['explanation_en'])
-        
-        st.subheader("🇹🇭 คำอธิบายและเฉลยละเอียดภาษาไทย")
-        st.write(q['explanation_th'])
-
-    # =========================================================
-    # 🏗️ 6. แท่นฟีเจอร์จัดเลย์เอาต์Persistent 3 กล่อง (กางรอตั้งแต่แรกเห็นโจทย์)
-    # =========================================================
-    st.markdown("---")
-    st.subheader("🛠️ เครื่องมือช่วยคิดและวิเคราะห์ประจำข้อสอบ")
-    
-    tab_vocab, tab_flashcard, tab_ai = st.tabs([
-        "📚 คำแปลศัพท์เทคนิคประจำข้อ (Vocabulary)", 
-        "📝 จด Flashcard ด่วนเข้ากล่องความจำ", 
-        "🧙‍♂️ แชทคุยถามคำถามสไตล์ AI Tutor"
+    st.title("🌿 Ghibli Control")
+    app_mode = st.radio("เลือกพื้นที่ทำงาน:", [
+        "📝 Practice Mode (ฝึกฝนแยกหัวข้อ)", 
+        "⏱️ Mock Exam Simulator (จำลองการสอบ)", 
+        "📊 Performance & AI Insights (สถิติและจุดอ่อน)"
     ])
     
-    # กล่องที่ 1: ตารางคลังแปลคำศัพท์เฉพาะทางประจำข้อสอบ
-    with tab_vocab:
-        st.caption("💡 รวมศัพท์หรูและคำเฉพาะสไตล์สถาบันการเงินที่เจอในโจทย์ข้อนี้:")
-        if q['key_vocabulary'] and isinstance(q['key_vocabulary'], list):
-            for item in q['key_vocabulary']:
-                st.markdown(f"🔹 **{item.get('word', '')}** : {item.get('translation', '')}")
-        else:
-            st.caption("ข้อนี้ไม่มีศัพท์เทคนิคยากเพิ่มเติมจ้า รันสมองได้อย่างลื่นไหล")
+    st.markdown("---")
+    st.header("🗂️ แฟลชการ์ดจดจำด่วน")
+    if st.session_state.my_flashcards:
+        for i, card in enumerate(st.session_state.my_flashcards):
+            st.info(f"📋 **ใบที่ {i+1}**\n{card}")
+    else:
+        st.caption("ยังไม่มีแฟลชการ์ดสะสมจ้า")
 
-    # กล่องที่ 2: ระบบพิมพ์สรุปย่อแฟลชการ์ดคัดลอกสูตรได้ดั่งใจ
-    with tab_flashcard:
-        st.caption("✍️ คัดลอกข้อความสูตรคำนวณหรือ Note เด็ด ๆ ด้านบนมาแปะโยนเข้ากล่องสะสมเพื่อเปิดทบทวนได้ตลอดเวลา:")
-        card_input = st.text_area("ข้อความบันทึกความจำสั้น:", placeholder="ตัวอย่าง: สูตร Bayes' Theorem คือ P(A|B) = [P(B|A)*P(A)] / P(B)", key="card_area")
-        if st.button("💾 บันทึกการ์ดใบนี้ลงกล่องข้าง"):
-            if card_input.strip():
-                st.session_state.my_flashcards.append(card_input.strip())
-                st.toast("บันทึกแฟลชการ์ดใบใหม่ขึ้นบอร์ดข้างเรียบร้อยแล้วจ้า! 🌰")
+# ดักจับกรณีไม่มีข้อมูลในระบบคลาวด์เลย
+if not global_pool:
+    st.warning("⚠️ ไม่พบข้อมูลโจทย์ในคลังข้อสอบคลาวด์ BigQuery กรุณาตรวจสอบการรันไฟล์ pipeline.py จ้า!")
+else:
+    # =========================================================
+    # 🗂️ หน้าที่ 1: Practice Mode (คืนค่าระบบ Topic Filter + กล่องกางสมบูรณ์)
+    # =========================================================
+    if app_mode == "📝 Practice Mode (ฝึกฝนแยกหัวข้อ)":
+        st.header("📝 โหมดฝึกฝนย่อยรายหัวข้อ")
+        
+        # 🎯 คืนค่าระบบฟิลเตอร์อัจฉริยะ (Topic Filters)
+        books_available = sorted(list(set([q['book'] for q in global_pool])))
+        selected_book = st.selectbox("1. เลือกเล่มหลักสูตร FRM:", ["ทั้งหมด"] + books_available)
+        
+        if selected_book != "ทั้งหมด":
+            topics_available = sorted(list(set([q['topic'] for q in global_pool if q['book'] == selected_book])))
+        else:
+            topics_available = sorted(list(set([q['topic'] for q in global_pool])))
+        selected_topic = st.selectbox("2. เลือกหัวข้อเรียนรู้เฉพาะเจาะจง:", ["ทั้งหมด"] + topics_available)
+        
+        # กรองชุดโจทย์ตามฟิลเตอร์
+        filtered_pool = global_pool
+        if selected_book != "ทั้งหมด":
+            filtered_pool = [q for q in filtered_pool if q['book'] == selected_book]
+        if selected_topic != "ทั้งหมด":
+            filtered_pool = [q for q in filtered_pool if q['topic'] == selected_topic]
+            
+        if not filtered_pool:
+            st.info("🍃 หัวข้อที่คุณเลือกยังไม่มีข้อสอบสไตล์ Business บรรจุอยู่ ลองเลือกหัวข้ออื่นดูนะจ้า")
+        else:
+            # ป้องกันกรณีดัชนีหลุดกรอบหลังจากเปลี่ยนฟิลเตอร์
+            if st.session_state.practice_idx >= len(filtered_pool):
+                st.session_state.practice_idx = 0
+                
+            q = filtered_pool[st.session_state.practice_idx]
+            
+            st.markdown(f"**📌 ข้อสอบข้อที่ {st.session_state.practice_idx + 1} / {len(filtered_pool)}**")
+            st.info(f"📚 วิชา: {q['book']} | 🎯 บทเรียน: {q['topic']} | ⚡ ระดับ: {q['difficulty']}")
+            st.write(q['question_text'])
+            
+            opts = [f"A: {q['options'].get('A','')}", f"B: {q['options'].get('B','')}", f"C: {q['options'].get('C','')}", f"D: {q['options'].get('D','') bricks')}"]
+            u_ans = st.radio("ระบุคำตอบที่แม่นยำที่สุดตามหลักการบริหารความเสี่ยง:", opts, index=0, key=f"prac_{q['question_id']}")
+            
+            c1, c2 = st.columns(2)
+            with c1:
+                if st.button("🚀 ส่งคำตอบตรวจทาน", use_container_width=True):
+                    st.session_state.practice_submitted = True
+            with c2:
+                if st.button("⏭️ สลับข้อถัดไป (สุ่ม)", use_container_width=True):
+                    st.session_state.practice_idx = random.randint(0, len(filtered_pool) - 1)
+                    st.session_state.practice_submitted = False
+                    st.session_state.practice_chat = []
+                    st.rerun()
+                    
+            if st.session_state.practice_submitted:
+                st.markdown("---")
+                final_choice = u_ans[0]
+                if final_choice == q['correct_option']:
+                    st.success(f"✨ ยอดเยี่ยมมากครับเฉลยถูกต้องคือข้อ {q['correct_option']}!")
+                    # บันทึกสถิติลงประวัติเพื่อคำนวณหน้ากราฟ
+                    if not any(d.get('recorded_id') == q['question_id'] for d in st.session_state.stats_history):
+                        st.session_state.stats_history.append({"book": q['book'], "topic": q['topic'], "is_correct": 1, "recorded_id": q['question_id']})
+                else:
+                    st.error(f"ผิดพลาดเล็กน้อยจ้า เฉลยที่แท้จริงคือข้อ {q['correct_option']}")
+                    if not any(d.get('recorded_id') == q['question_id'] for d in st.session_state.stats_history):
+                        st.session_state.stats_history.append({"book": q['book'], "topic": q['topic'], "is_correct": 0, "recorded_id": q['question_id']})
+                        
+                st.markdown(f"**📖 Detailed Explanation (EN):**\n{q['explanation_en']}")
+                st.markdown(f"**🇹🇭 คำอธิบายฉบับภาษาไทยสถาบันการเงิน:**\n{q['explanation_th']}")
+                
+            # กางแผงเครื่องมือช่วยคิดวิเคราะห์ 3 ชิ้นพร้อมกันแบบ Persistent
+            st.markdown("---")
+            st.subheader("🛠️ เครื่องมือช่วยคิดและวิเคราะห์ประจำข้อสอบ")
+            
+            # 1. กล่องคลังศัพท์เทคนิค
+            st.markdown('<div class="tool-card"><div class="tool-title">📚 ศัพท์เฉพาะประจำข้อ (Vocabulary)</div></div>', unsafe_allow_html=True)
+            if q['key_vocabulary']:
+                for item in q['key_vocabulary']:
+                    st.markdown(f"🔹 **{item.get('word','')}** : {item.get('translation','')}")
+            else:
+                st.caption("ข้อนี้ไม่มีศัพท์เทคนิคยากเพิ่มเติมจ้า")
+                
+            # 2. กล่องจด Flashcard
+            st.markdown('<div class="tool-card"><div class="tool-title">📝 บันทึกแฟลชการ์ดเข้ากล่องความจำ</div></div>', unsafe_allow_html=True)
+            txt_input = st.text_area("สรุปย่อหรือคัดสูตรเด็ดมาวางที่นี่:", key="note_area", placeholder="พิมพ์โน้ตส่วนตัว...")
+            if st.button("💾 เซฟแฟลชการ์ด"):
+                if txt_input.strip():
+                    st.session_state.my_flashcards.append(txt_input.strip())
+                    st.toast("บันทึกเรียบร้อยจ้า! 🌰")
+                    st.rerun()
+                    
+            # 3. ช่องแชท AI Tutor
+            st.markdown('<div class="tool-card"><div class="tool-title">🧙‍♂️ ช่องแชทติวเตอร์เวทมนตร์ (AI Tutor)</div></div>', unsafe_allow_html=True)
+            for m in st.session_state.practice_chat:
+                with st.chat_message(m["role"]): st.write(m["text"])
+            c_input = st.chat_input("💬 สอบถามข้อสงสัยเกี่ยวกับสูตรคำนวณหรือตรรกะข้อนี้...")
+            if c_input:
+                st.session_state.practice_chat.append({"role": "user", "text": c_input})
+                ctx = f"You are a warm FRM tutor. Question: {q['question_text']}. User asks: {c_input}. Answer warmly and concisely using 'ครับจ้า'"
+                with st.spinner("AI กำลังเรียบเรียงคำตอบ..."):
+                    res = ai_client.models.generate_content(model='gemini-3.1-flash-lite', contents=ctx)
+                    st.session_state.practice_chat.append({"role": "model", "text": res.text})
                 st.rerun()
 
-    # กล่องที่ 3: ช่องหน้าต่างแชท AI ติวเตอร์ปรึกษาข้อสงสัยเชิงลึกทางการเงิน
-    with tab_ai:
-        st.caption("🧙‍♂️ มีจุดไหนในโจทย์หรือคำอธิบายที่อ่านแล้วยังติดขัด คุยปรึกษากับที่ปรึกษาความเสี่ยงกิบลิได้เลยจ้า:")
+    # =========================================================
+    # ⏱️ หน้าที่ 2: Mock Exam Simulator (คืนค่าระบบสอบจริง + นับเวลา)
+    # =========================================================
+    elif app_mode == "⏱️ Mock Exam Simulator (จำลองการสอบ)":
+        st.header("⏱️ ระบบจำลองการสอบสากลระดับสถาบัน (Mock Exam)")
+        st.caption("ระบบจะทำการดึงโจทย์แบบคัดเลือกกระจายสัดส่วนเนื้อหาตามน้ำหนักจริงของข้อสอบ GARP (20% Foundations, 20% Quant, 30% Markets, 30% Models)")
         
-        # แสดงบทสนทนาย้อนหลังภายในข้อนั้น
-        for msg in st.session_state.ai_chat_history:
-            with st.chat_message(msg["role"]):
-                st.write(msg["text"])
+        # แท่นเปิดระบบและจัดเตรียมชุดข้อสอบตามโควตาน้ำหนักจริง
+        if not st.session_state.mock_questions and not st.session_state.mock_completed:
+            st.subheader("🎲 ตั้งค่าการจัดชุดข้อสอบจำลอง")
+            exam_size = st.selectbox("เลือกจำนวนข้อสอบจำลอง:", [4, 10, 20], index=1)
+            duration = st.slider("เลือกเวลาทำข้อสอบ (นาที):", 5, 60, 20)
+            
+            if st.button("🎬 เริ่มต้นการทำข้อสอบ (Start Exam)"):
+                # แบ่งสัดส่วนโควตาตามข้อสอบจริง
+                w_b1 = max(1, int(exam_size * 0.20))
+                w_b2 = max(1, int(exam_size * 0.20))
+                w_b3 = max(1, int(exam_size * 0.30))
+                w_b4 = max(1, int(exam_size * 0.30))
                 
-        # กล่องรับข้อความพิมพ์คุย
-        chat_input_text = st.chat_input("💬 พิมพ์คำถามสงสัยเกี่ยวกับคณิตศาสตร์หรือบริบทข้อนี้...")
-        if chat_input_text:
-            # พิมพ์ฝั่งผู้ใช้งานโชว์บนหน้าจอ
-            st.session_state.ai_chat_history.append({"role": "user", "text": chat_input_text})
+                pool_b1 = [q for q in global_pool if "Foundations" in q['book']]
+                pool_b2 = [q for q in global_pool if "Quantitative" in q['book']]
+                pool_b3 = [q for q in global_pool if "Markets" in q['book']]
+                pool_b4 = [q for q in global_pool if "Valuation" in q['book']]
+                
+                # ทำการสุ่มดึงข้อสอบเข้าชุดตามน้ำหนักโควตา
+                selected_mock = []
+                if pool_b1: selected_mock.extend(random.sample(pool_b1, min(len(pool_b1), w_b1)))
+                if pool_b2: selected_mock.extend(random.sample(pool_b2, min(len(pool_b2), w_b2)))
+                if pool_b3: selected_mock.extend(random.sample(pool_b3, min(len(pool_b3), w_b3)))
+                if pool_b4: selected_mock.extend(random.sample(pool_b4, min(len(pool_b4), w_b4)))
+                
+                random.shuffle(selected_mock)
+                st.session_state.mock_questions = selected_mock
+                st.session_state.mock_start_time = time.time()
+                st.session_state.mock_duration_minutes = duration
+                st.session_state.mock_user_answers = {}
+                st.session_state.mock_completed = False
+                st.rerun()
+                
+        # หากระบบข้อสอบจำลองกำลังทำงานอยู่
+        if st.session_state.mock_questions and not st.session_state.mock_completed:
+            # ⏳ กลไกคำนวณและแสดงเวลานับถอยหลัง
+            elapsed = time.time() - st.session_state.mock_start_time
+            total_seconds = st.session_state.mock_duration_minutes * 60
+            remaining = total_seconds - elapsed
             
-            # บรรจุบริบทโจทย์ส่งเข้าสมอง Gemini เพื่อให้ตอบคำถามได้ตรงจุดไม่หลุดประเด็น
-            ai_context_prompt = f"""
-            You are a helpful, warm Ghibli-themed FRM AI Tutor helping Nathan (a Financial Business Analyst). 
-            He is looking at this question:
-            Question: {q['question_text']}
-            Options: {q['options']}
-            Correct Answer: {q['correct_option']}
-            Explanation EN: {q['explanation_en']}
-            Explanation TH: {q['explanation_th']}
+            if remaining <= 0:
+                st.session_state.mock_completed = True
+                st.warning("🚨 หมดเวลาทำข้อสอบจำลองแล้ว! ระบบกำลังนำส่งคำตอบและตัดเกรดอัตโนมัติ...")
+                st.rerun()
+                
+            mins, secs = divmod(int(remaining), 60)
+            st.markdown(f'<div class="exam-timer">⏳ เวลาคงเหลือสำหรับการทดสอบ: {mins:02d}:{secs:02d} นาที</div>', unsafe_allow_html=True)
             
-            Nathan's Question: {chat_input_text}
+            # กางข้อสอบเรียงยาวแบบสมจริงเพื่อให้พร้อมตรวจสอบไล่ข้อ
+            for idx, mq in enumerate(st.session_state.mock_questions):
+                st.markdown(f"**📌 ข้อที่ {idx + 1}:** ({mq['book']})")
+                st.write(mq['question_text'])
+                
+                m_opts = {
+                    "A": f"A: {mq['options'].get('A','')}",
+                    "B": f"B: {mq['options'].get('B','')}",
+                    "C": f"C: {mq['options'].get('C','')}",
+                    "D": f"D: {mq['options'].get('D','')}"
+                }
+                
+                # ทำการจำบันทึกคำตอบผู้ใช้ลงดิสก์ชั่วคราวรายข้อ
+                current_saved = st.session_state.mock_user_answers.get(mq['question_id'], "A")
+                saved_idx = list(m_opts.keys()).index(current_saved) if current_saved in m_opts else 0
+                
+                chosen = st.radio(f"เลือกคำตอบข้อ {idx+1}:", list(m_opts.values()), index=saved_idx, key=f"mock_key_{mq['question_id']}")
+                st.session_state.mock_user_answers[mq['question_id']] = chosen[0]
+                st.markdown("---")
+                
+            if st.button("🏁 กดส่งกระดาษคำตอบ (Submit Exam)", use_container_width=True):
+                st.session_state.mock_completed = True
+                st.rerun()
+                
+        # 📊 แผงรายงานสรุปผลคะแนนตัดเกรดหลังจากสอบเสร็จ
+        if st.session_state.mock_completed:
+            st.subheader("📊 ผลการวิเคราะห์คะแนนสอบจำลองสุทธิ")
+            correct_count = 0
+            mock_logs = []
             
-            Answer him concisely using professional financial jargon mixed with a very warm, supportive tone ("ครับจ้า", "นาธานครับ"). Keep it highly educational.
-            """
+            for mq in st.session_state.mock_questions:
+                u_pick = st.session_state.mock_user_answers.get(mq['question_id'], "ไม่ได้ฝนคำตอบ")
+                is_correct = 1 if u_pick == mq['correct_option'] else 0
+                if is_correct: correct_count += 1
+                
+                # บันทึกเข้าประวัติสถิติรวมของระบบโดยอัตโนมัติ
+                st.session_state.stats_history.append({"book": mq['book'], "topic": mq['topic'], "is_correct": is_correct, "recorded_id": f"M_{mq['question_id']}"})
+                
+                mock_logs.append({
+                    "วิชา": mq['book'],
+                    "คำตอบคุณ": u_pick,
+                    "เฉลยจริง": mq['correct_option'],
+                    "ผลลัพธ์": "✅ ถูกต้อง" if is_correct else "❌ ผิดพลาด"
+                })
+                
+            st.metric("คะแนนที่ได้รวม", f"{correct_count} / {len(st.session_state.mock_questions)} ข้อ", 
+                      delta=f"คิดเป็น {int(correct_count/len(st.session_state.mock_questions)*100)}%")
             
-            with st.spinner("AI กิบลิกำลังคำนวณสูตรและเรียบเรียงคำตอบสักครู่จ้า..."):
-                try:
-                    response = ai_client.models.generate_content(
-                        model='gemini-3.1-flash-lite',
-                        contents=ai_context_prompt
-                    )
-                    st.session_state.ai_chat_history.append({"role": "model", "text": response.text})
-                except Exception as chat_err:
-                    st.session_state.ai_chat_history.append({"role": "model", "text": f"ขออภัยจ้านาธาน ระบบ API เกิดอาการสะดุดชั่วคราว: {chat_err}"})
-            st.rerun()
+            st.table(pd.DataFrame(mock_logs))
+            
+            if st.button("🔄 ล้างค่าเพื่อจัดชุดทำข้อสอบรอบใหม่"):
+                st.session_state.mock_questions = []
+                st.session_state.mock_user_answers = {}
+                st.session_state.mock_completed = False
+                st.rerun()
+
+    # =========================================================
+    # 📊 หน้าที่ 3: Performance & AI Insights (สถิติ + วิเคราะห์จุดอ่อน)
+    # =========================================================
+    elif app_mode == "📊 Performance & AI Insights (สถิติและจุดอ่อน)":
+        st.header("📊 แผงควบคุมสถิติวิเคราะห์ประสิทธิภาพ (Analytics Board)")
+        st.caption("แดชบอร์ดประมวลผลความแม่นยำรายวิชา เพื่อจับตาทิศทางการเตรียมความพร้อมของคุณนาธานแบบเรียลไทม์")
+        
+        if not st.session_state.stats_history:
+            st.info("🍃 ระบบยังไม่มีประวัติการทำข้อสอบของคุณนาธานในเซสชันนี้ ลองไปลุยโหมดฝึกฝนหรือทำข้อสอบจำลองเพื่อเก็บข้อมูลก่อนนะจ้า")
+        else:
+            # ใช้ Pandas สรุปผลความแม่นยำแบ่งกลุ่มตามรายเล่มวิชาทางการ
+            df = pd.DataFrame(st.session_state.stats_history)
+            summary_df = df.groupby('book').agg(
+                จำนวนที่ทำ=('is_correct', 'count'),
+                ตอบถูกต้อง=('is_correct', 'sum')
+            ).reset_index()
+            summary_df['เปอร์เซ็นต์ความแม่นยำ'] = (summary_df['ตอบถูกต้อง'] / summary_df['จำนวนที่ทำ'] * 100).round(1)
+            
+            st.subheader("📈 สรุปแยกรายวิชาหลักสูตร")
+            st.dataframe(summary_df, use_container_width=True)
+            
+            # วาดกราฟแท่งเปรียบเทียบความแม่นยำสไตล์มินิมอลสบายตา
+            fig = px.bar(summary_df, x='book', y='เปอร์เซ็นต์ความแม่นยำ', 
+                         title="📊 อัตราความแม่นยำแยกตามเล่มหลักสูตร (%)",
+                         labels={'book': 'วิชาหลักสูตร', 'เปอร์เซ็นต์ความแม่นยำ': 'เปอร์เซ็นต์ความเที่ยงตรง (%)'},
+                         color='เปอร์เซ็นต์ความแม่นยำ', color_continuous_scale=px.colors.sequential.Mint)
+            fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # 🧙‍♂️ แท่นวิเคราะห์จุดอ่อนดึงปัญญาประดิษฐ์ (AI Weakness Auditor)
+            st.markdown("---")
+            st.subheader("🧙‍♂️ กล่องวินิจฉัยจุดอ่อนและแผนการเรียนจาก AI ติวเตอร์")
+            st.write("กดปุ่มด้านล่างเพื่อสั่งให้ระบบวิเคราะห์ประวัติการทำข้อสอบทั้งหมด และคำนวณหาจุดบกพร่องตามน้ำหนักความยากของข้อสอบจริง")
+            
+            if st.button("✨ ให้ AI สรุปรายงานจุดอ่อนและกลยุทธ์ทบทวน"):
+                # สรุปโครงสร้างผลคะแนนส่งเป็น Text บริบทให้ปัญญาประดิษฐ์
+                stats_text = ""
+                for index, row in summary_df.iterrows():
+                    stats_text += f"- วิชา {row['book']}: ทำไป {row['จำนวนที่ทำ']} ข้อ, ตอบถูก {row['ตอบถูกต้อง']} ข้อ (ความแม่นยำ {row['เปอร์เซ็นต์ความแม่นยำ']}%)\n"
+                    
+                ai_analysis_prompt = f"""
+                You are an elite, warm Ghibli-themed FRM Risk Management Executive and a Senior Tutor. 
+                Analyze Nathan's current performance metrics below and generate a professional, highly strategic study guidance report.
+                
+                NATHAN'S ACCURACY PROFILE:
+                {stats_text}
+                
+                INSTRUCTIONS FOR REPORT STRUCTURE:
+                1. Identify which books require immediate critical attention based on low accuracy scores.
+                2. Provide concrete risk-practitioner advice (e.g., focus more on Delta hedging formulas, OLS diagnostics, or Basel framework depending on the weak fields).
+                3. Deliver the advice in a very warm, supportive, peer-like tone mixed with financial expertise. Use standard professional Thai banking terminology where appropriate. End sentences with 'ครับจ้า'.
+                """
+                
+                with st.spinner("AI กำลังกางแผนที่หลักสูตรและจัดทำแผนการทบทวนสุดพิเศษให้คุณนาธาน..."):
+                    try:
+                        ai_report = ai_client.models.generate_content(
+                            model='gemini-3.1-flash-lite',
+                            contents=ai_analysis_prompt
+                        )
+                        st.markdown('<div class="tool-card">', unsafe_allow_html=True)
+                        st.markdown("### 📜 รายงานผลสัมฤทธิ์และกลยุทธ์เตรียมสอบฉบับเฉพาะบุคคล")
+                        st.write(ai_report.text)
+                        st.markdown('</div>', unsafe_allow_html=True)
+                    except Exception as e:
+                        st.error(f"ระบบเชื่อมต่อ AI เกิดอาการสะดุด: {e}")
