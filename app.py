@@ -11,7 +11,7 @@ from google.cloud import bigquery
 from google.oauth2 import service_account
 
 # =========================================================
-# 🔒 1. ระบบเชื่อมต่อ Cloud & Database (ยิงตรงผ่าน Memory)
+# 🔒 1. ระบบเชื่อมต่อ Cloud & Database
 # =========================================================
 GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY"))
 
@@ -26,7 +26,7 @@ else:
 ai_client = genai.Client(api_key=GEMINI_API_KEY)
 
 # =========================================================
-# 🗄️ 2. ระบบ Auto-Sync ฐานข้อมูล (สร้างตาราง & ดึง/ส่ง/ลบข้อมูล)
+# 🗄️ 2. ระบบ Auto-Sync ฐานข้อมูล 
 # =========================================================
 @st.cache_resource(show_spinner=False)
 def ensure_db_tables_exist():
@@ -90,7 +90,7 @@ def fetch_user_data(username):
     return stats, mocks, cards
 
 # =========================================================
-# 🎨 3. ตั้งค่าธีมโฮมสเตย์กิบลิอบอุ่น (CSS) + กรอบสีทอง
+# 🎨 3. ตั้งค่าธีมโฮมสเตย์กิบลิอบอุ่น (CSS)
 # =========================================================
 st.set_page_config(page_title="FRM Ghibli Central", page_icon="🌿", layout="wide")
 
@@ -110,31 +110,28 @@ st.markdown("""
     .fc-divider { border-top: 1.5px dashed #D9C5B2; margin: 12px 0; }
     .fc-back { color: #4A3E3D; font-size: 0.95rem; }
     
-    /* 🏆 CSS สำหรับกรอบทองคำและแอนิเมชัน 3D */
+    /* 🏆 CSS สำหรับกรอบทองคำ Ghibli Academy Rewards */
     .gold-frame-container { text-align: center; margin-top: 15px; margin-bottom: 20px; }
     .gold-frame {
         display: inline-block;
         padding: 6px;
         background: linear-gradient(135deg, #FFDF00 0%, #DAA520 50%, #B8860B 100%);
-        border-radius: 16px;
+        border-radius: 100px; /* ทำให้กรอบกลมมนตามภาพต้นแบบ */
         box-shadow: 0 6px 12px rgba(218, 165, 32, 0.3);
-        margin-bottom: 12px;
+        margin-bottom: 15px;
     }
     .gold-frame img {
         width: 150px;
         height: 150px;
         object-fit: cover;
-        border-radius: 10px;
-        border: 2px solid #FFF8DC;
+        border-radius: 50%; /* ทำให้ภาพด้านในกลม */
+        border: 3px solid #FFF8DC;
         display: block;
         background-color: white;
     }
-    .badge-text-outside {
-        color: #4A3E3D;
-        font-size: 0.95rem;
-        line-height: 1.4;
-    }
-    .badge-title { font-weight: 600; font-size: 1.1rem; color: #DAA520; }
+    .badge-text-outside { color: #4A3E3D; font-size: 0.90rem; line-height: 1.4; }
+    .badge-level { font-weight: 600; font-size: 1.2rem; color: #DAA520; margin-bottom: 4px;}
+    .badge-title { font-weight: 600; font-size: 1.05rem; color: #4A3E3D; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -172,7 +169,7 @@ if "mock_duration_minutes" not in st.session_state: st.session_state.mock_durati
 if "mock_completed" not in st.session_state: st.session_state.mock_completed = False
 
 # =========================================================
-# 🧭 6. แผงควบคุมด้านข้าง (Ghibli Gamification Control)
+# 🧭 6. แผงควบคุมด้านข้าง (Ghibli Gamification Control 5 Levels)
 # =========================================================
 with st.sidebar:
     st.title("🌿 Ghibli Control")
@@ -186,26 +183,39 @@ if "db_loaded_for" not in st.session_state or st.session_state.db_loaded_for != 
         st.session_state.my_flashcards = s_cards
         st.session_state.db_loaded_for = current_user
 
-# 🧮 คำนวณเลเวลเพื่อปลดล็อกตราประทับ
+# 🧮 คำนวณเลเวลเพื่อปลดล็อกตราประทับ 5 อันดับ
 user_history = [d for d in st.session_state.global_stats_log if d["user"] == current_user]
 total_q = len(user_history)
 correct_q = sum([d["is_correct"] for d in user_history])
 overall_acc = (correct_q / total_q * 100) if total_q > 0 else 0
 
 with st.sidebar:
-    # 🏅 โซนตราประทับเกียรติยศ (3D Animated in Gold Frame) ไร้ตัวเลขเป๊ะๆ แบบเกม RPG
-    if overall_acc >= 70 and total_q >= 20: 
-        gif_url = "https://media1.tenor.com/m/8QzX37xS8UIAAAAC/capybara-onsen.gif"
-        title = "🦦 ราชาคาปิบาร่าออนเซ็น"
-        desc = "ระดับปรมาจารย์! พร้อมลุยสนามจริง"
-    elif overall_acc >= 50 and total_q >= 10: 
-        gif_url = "https://media.giphy.com/media/4ZrruD2A0pUuA/giphy.gif"
-        title = "🔥 เปลวไฟ Calcifer"
-        desc = "ระดับกลาง! ลุยทบทวนจุดอ่อนอีกนิด"
+    # 🏅 โซนตราประทับเกียรติยศ (Ghibli Academy Rewards - 5 Levels)
+    if overall_acc >= 90 and total_q >= 10: 
+        gif_url = "https://media.tenor.com/7H-O7G8a1YcAAAAi/the-cat-returns-baron.gif"
+        level_txt = "Level 5"
+        title = "จ้าวแห่งสวนสวรรค์"
+        desc = "The Baron (from The Cat Returns)"
+    elif overall_acc >= 75 and total_q >= 5: 
+        gif_url = "https://media.tenor.com/W2hVn4E7dO0AAAAi/castle-in-the-sky-laputa.gif"
+        level_txt = "Level 4"
+        title = "ผู้พิทักษ์ปราสาทลอยฟ้า"
+        desc = "Guardian of the floating Castle (Laputa)"
+    elif overall_acc >= 60 and total_q >= 3: 
+        gif_url = "https://media.tenor.com/0iI2O01C46EAAAAi/kiki-kikis-delivery-service.gif"
+        level_txt = "Level 3"
+        title = "นักสำรวจเวทมนตร์"
+        desc = "A young student of Magic"
+    elif overall_acc >= 40 and total_q > 0: 
+        gif_url = "https://media.tenor.com/R_Z1l4F7Cg8AAAAi/laputa-robot.gif"
+        level_txt = "Level 2"
+        title = "นักบินฝึกหัด"
+        desc = "Friendly Laputan robot | apprentice pilot"
     elif total_q > 0: 
-        gif_url = "https://media.giphy.com/media/J1aivEv1pEUlS9A1QO/giphy.gif"
-        title = "🌰 เมล็ดโอ๊ค Totoro"
-        desc = "นักวิเคราะห์ฝึกหัด! สะสมประสบการณ์ต่อไป"
+        gif_url = "https://media.tenor.com/qLh2P8-tYJcAAAAi/kodama-princess-mononoke.gif"
+        level_txt = "Level 1"
+        title = "ต้นกล้าแห่งความเพียร"
+        desc = "A tiny Kodama from Princess Mononoke"
     else: 
         gif_url = None
 
@@ -216,13 +226,14 @@ with st.sidebar:
                     <img src="{gif_url}">
                 </div>
                 <div class="badge-text-outside">
+                    <div class="badge-level">{level_txt}</div>
                     <div class="badge-title">{title}</div>
-                    {desc}
+                    <div>{desc}</div>
                 </div>
             </div>
         ''', unsafe_allow_html=True)
     else:
-        st.caption("🎮 เริ่มต้นทำโจทย์ข้อแรกเพื่อปลดล็อกถ้วยรางวัลแอนิเมชันจ้า...")
+        st.caption("🎮 Ghibli Academy Rewards: เริ่มต้นทำโจทย์ข้อแรกเพื่อปลดล็อกเกียรติยศจ้า...")
 
     st.markdown("---")
     app_mode = st.radio("เลือกพื้นที่ทำงาน (Menu):", ["📝 Practice Mode", "⏱️ Mock Exam Simulator", "📊 Performance & AI Insights", "🗂️ Flashcard Studio"])
