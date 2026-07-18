@@ -11,7 +11,7 @@ from google.cloud import bigquery
 from google.oauth2 import service_account
 
 # =========================================================
-# 🔒 1. ระบบเชื่อมต่อ Cloud & Database
+# 🔒 1. ระบบเชื่อมต่อ Cloud & Database (Auto-detect Project ID)
 # =========================================================
 GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY"))
 
@@ -19,18 +19,20 @@ if "GCP_JSON_TEXT" in st.secrets:
     gcp_info = json.loads(st.secrets["GCP_JSON_TEXT"])
     credentials = service_account.Credentials.from_service_account_info(gcp_info)
     bq_client = bigquery.Client(credentials=credentials, project=gcp_info["project_id"])
+    PROJECT_ID = gcp_info["project_id"]
 else:
     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "frm-ai-tutor-1cef93cd880b.json"
     bq_client = bigquery.Client()
+    PROJECT_ID = bq_client.project
 
 ai_client = genai.Client(api_key=GEMINI_API_KEY)
 
 # =========================================================
-# 🗄️ 2. ระบบ Auto-Sync ฐานข้อมูล 
+# 🗄️ 2. ระบบ Auto-Sync ฐานข้อมูล (เปลี่ยนเป็น Synchronous INSERT)
 # =========================================================
 @st.cache_resource(show_spinner=False)
 def ensure_db_tables_exist():
-    dataset_ref = bq_client.dataset("FRM_DATASET", project="frm-ai-tutor")
+    dataset_ref = bq_client.dataset("FRM_DATASET")
     schema_stats = [
         bigquery.SchemaField("user_name", "STRING"), bigquery.SchemaField("book", "STRING"),
         bigquery.SchemaField("topic", "STRING"), bigquery.SchemaField("is_correct", "INTEGER"),
@@ -50,43 +52,57 @@ try: ensure_db_tables_exist()
 except: pass
 
 def push_stat_to_db(stat):
-    try: bq_client.insert_rows_json("frm-ai-tutor.FRM_DATASET.user_stats", [{"user_name": stat["user"], "book": stat["book"], "topic": stat["topic"], "is_correct": stat["is_correct"], "recorded_id": stat["recorded_id"], "timestamp": stat["timestamp"]}])
-    except: pass
+    try:
+        q = f"INSERT INTO `{PROJECT_ID}.FRM_DATASET.user_stats` (user_name, book, topic, is_correct, recorded_id, timestamp) VALUES (@u, @b, @t, @c, @r, @ts)"
+        cfg = bigquery.QueryJobConfig(query_parameters=[
+            bigquery.ScalarQueryParameter("u", "STRING", stat["user"]), bigquery.ScalarQueryParameter("b", "STRING", stat["book"]),
+            bigquery.ScalarQueryParameter("t", "STRING", stat["topic"]), bigquery.ScalarQueryParameter("c", "INTEGER", stat["is_correct"]),
+            bigquery.ScalarQueryParameter("r", "STRING", stat["recorded_id"]), bigquery.ScalarQueryParameter("ts", "FLOAT", stat["timestamp"])
+        ])
+        bq_client.query(q, job_config=cfg).result()
+    except Exception as e: print(f"DB Error: {e}")
 
 def push_mock_to_db(mock_log):
-    try: bq_client.insert_rows_json("frm-ai-tutor.FRM_DATASET.mock_scores", [{"user_name": mock_log["user"], "score": mock_log["score"], "timestamp": mock_log["timestamp"]}])
+    try:
+        q = f"INSERT INTO `{PROJECT_ID}.FRM_DATASET.mock_scores` (user_name, score, timestamp) VALUES (@u, @s, @ts)"
+        cfg = bigquery.QueryJobConfig(query_parameters=[
+            bigquery.ScalarQueryParameter("u", "STRING", mock_log["user"]), bigquery.ScalarQueryParameter("s", "FLOAT", mock_log["score"]), bigquery.ScalarQueryParameter("ts", "FLOAT", mock_log["timestamp"])
+        ])
+        bq_client.query(q, job_config=cfg).result()
     except: pass
 
 def push_flashcard_to_db(fc):
-    try: bq_client.insert_rows_json("frm-ai-tutor.FRM_DATASET.flashcards", [{"user_name": fc["user"], "front": fc["front"], "back": fc["back"]}])
+    try:
+        q = f"INSERT INTO `{PROJECT_ID}.FRM_DATASET.flashcards` (user_name, front, back) VALUES (@u, @f, @b)"
+        cfg = bigquery.QueryJobConfig(query_parameters=[
+            bigquery.ScalarQueryParameter("u", "STRING", fc["user"]), bigquery.ScalarQueryParameter("f", "STRING", fc["front"]), bigquery.ScalarQueryParameter("b", "STRING", fc["back"])
+        ])
+        bq_client.query(q, job_config=cfg).result()
     except: pass
 
 def delete_flashcard_from_db(fc):
     try:
-        query = """
-            DELETE FROM `frm-ai-tutor.FRM_DATASET.flashcards`
-            WHERE user_name = @user_name AND front = @front AND back = @back
-        """
-        job_config = bigquery.QueryJobConfig(
-            query_parameters=[
-                bigquery.ScalarQueryParameter("user_name", "STRING", fc.get("user")),
-                bigquery.ScalarQueryParameter("front", "STRING", fc.get("front")),
-                bigquery.ScalarQueryParameter("back", "STRING", fc.get("back")),
-            ]
-        )
-        bq_client.query(query, job_config=job_config).result()
+        q = f"DELETE FROM `{PROJECT_ID}.FRM_DATASET.flashcards` WHERE user_name = @u AND front = @f AND back = @b"
+        cfg = bigquery.QueryJobConfig(query_parameters=[
+            bigquery.ScalarQueryParameter("u", "STRING", fc.get("user")), bigquery.ScalarQueryParameter("f", "STRING", fc.get("front")), bigquery.ScalarQueryParameter("b", "STRING", fc.get("back"))
+        ])
+        bq_client.query(q, job_config=cfg).result()
     except: pass
 
 def fetch_user_data(username):
     stats, mocks, cards = [], [], []
     try:
-        s_rows = bq_client.query(f"SELECT * FROM `frm-ai-tutor.FRM_DATASET.user_stats` WHERE user_name = '{username}'").result()
+        cfg = bigquery.QueryJobConfig(query_parameters=[bigquery.ScalarQueryParameter("u", "STRING", username)])
+        
+        s_rows = bq_client.query(f"SELECT * FROM `{PROJECT_ID}.FRM_DATASET.user_stats` WHERE user_name = @u", job_config=cfg).result()
         stats = [{"user": r.user_name, "book": r.book, "topic": r.topic, "is_correct": r.is_correct, "recorded_id": r.recorded_id, "timestamp": r.timestamp} for r in s_rows]
-        m_rows = bq_client.query(f"SELECT * FROM `frm-ai-tutor.FRM_DATASET.mock_scores` WHERE user_name = '{username}'").result()
+        
+        m_rows = bq_client.query(f"SELECT * FROM `{PROJECT_ID}.FRM_DATASET.mock_scores` WHERE user_name = @u", job_config=cfg).result()
         mocks = [{"user": r.user_name, "score": r.score, "timestamp": r.timestamp} for r in m_rows]
-        c_rows = bq_client.query(f"SELECT * FROM `frm-ai-tutor.FRM_DATASET.flashcards` WHERE user_name = '{username}'").result()
+        
+        c_rows = bq_client.query(f"SELECT * FROM `{PROJECT_ID}.FRM_DATASET.flashcards` WHERE user_name = @u", job_config=cfg).result()
         cards = [{"user": r.user_name, "front": r.front, "back": r.back} for r in c_rows]
-    except: pass
+    except Exception as e: print(f"Load Error: {e}")
     return stats, mocks, cards
 
 # =========================================================
@@ -116,7 +132,7 @@ st.markdown("""
         display: inline-block;
         padding: 6px;
         background: linear-gradient(135deg, #FFDF00 0%, #DAA520 50%, #B8860B 100%);
-        border-radius: 100px; /* ทำให้กรอบกลมมนตามภาพต้นแบบ */
+        border-radius: 100px; 
         box-shadow: 0 6px 12px rgba(218, 165, 32, 0.3);
         margin-bottom: 15px;
     }
@@ -124,7 +140,7 @@ st.markdown("""
         width: 150px;
         height: 150px;
         object-fit: cover;
-        border-radius: 50%; /* ทำให้ภาพด้านในกลม */
+        border-radius: 50%; 
         border: 3px solid #FFF8DC;
         display: block;
         background-color: white;
@@ -141,7 +157,7 @@ st.markdown("""
 @st.cache_data(show_spinner=False)
 def load_global_questions():
     try:
-        rows = bq_client.query("SELECT * FROM `frm-ai-tutor.FRM_DATASET.questions`").result()
+        rows = bq_client.query(f"SELECT * FROM `{PROJECT_ID}.FRM_DATASET.questions`").result()
         pool = []
         for row in rows:
             pool.append({
@@ -190,29 +206,29 @@ correct_q = sum([d["is_correct"] for d in user_history])
 overall_acc = (correct_q / total_q * 100) if total_q > 0 else 0
 
 with st.sidebar:
-    # 🏅 โซนตราประทับเกียรติยศ (Ghibli Academy Rewards - 5 Levels)
+    # 🏅 โซนตราประทับเกียรติยศ (ใช้ลิงก์ Raw GIF สยบอาการภาพดำ)
     if overall_acc >= 90 and total_q >= 10: 
-        gif_url = "https://media.tenor.com/7H-O7G8a1YcAAAAi/the-cat-returns-baron.gif"
+        gif_url = "https://media1.tenor.com/m/7H-O7G8a1YcAAAAC/the-cat-returns-baron.gif"
         level_txt = "Level 5"
         title = "จ้าวแห่งสวนสวรรค์"
         desc = "The Baron (from The Cat Returns)"
     elif overall_acc >= 75 and total_q >= 5: 
-        gif_url = "https://media.tenor.com/W2hVn4E7dO0AAAAi/castle-in-the-sky-laputa.gif"
+        gif_url = "https://media1.tenor.com/m/W2hVn4E7dO0AAAAC/castle-in-the-sky-laputa.gif"
         level_txt = "Level 4"
         title = "ผู้พิทักษ์ปราสาทลอยฟ้า"
         desc = "Guardian of the floating Castle (Laputa)"
     elif overall_acc >= 60 and total_q >= 3: 
-        gif_url = "https://media.tenor.com/0iI2O01C46EAAAAi/kiki-kikis-delivery-service.gif"
+        gif_url = "https://media1.tenor.com/m/0iI2O01C46EAAAAC/kiki-kikis-delivery-service.gif"
         level_txt = "Level 3"
         title = "นักสำรวจเวทมนตร์"
         desc = "A young student of Magic"
     elif overall_acc >= 40 and total_q > 0: 
-        gif_url = "https://media.tenor.com/R_Z1l4F7Cg8AAAAi/laputa-robot.gif"
+        gif_url = "https://media1.tenor.com/m/R_Z1l4F7Cg8AAAAC/laputa-robot.gif"
         level_txt = "Level 2"
         title = "นักบินฝึกหัด"
         desc = "Friendly Laputan robot | apprentice pilot"
     elif total_q > 0: 
-        gif_url = "https://media.tenor.com/qLh2P8-tYJcAAAAi/kodama-princess-mononoke.gif"
+        gif_url = "https://media1.tenor.com/m/qLh2P8-tYJcAAAAC/kodama-princess-mononoke.gif"
         level_txt = "Level 1"
         title = "ต้นกล้าแห่งความเพียร"
         desc = "A tiny Kodama from Princess Mononoke"
