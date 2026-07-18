@@ -15,12 +15,10 @@ from google.oauth2 import service_account
 GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY"))
 
 if "GCP_JSON_TEXT" in st.secrets:
-    # 🚀 โหมดรันบนคลาวด์สาธารณะ: แปลงเนื้อหา JSON จากกล่องความลับมาใช้ผ่าน Memory
     gcp_info = json.loads(st.secrets["GCP_JSON_TEXT"])
     credentials = service_account.Credentials.from_service_account_info(gcp_info)
     bq_client = bigquery.Client(credentials=credentials, project=gcp_info["project_id"])
 else:
-    # 💻 โหมดรันในเครื่องคอมตัวเอง
     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "frm-ai-tutor-1cef93cd880b.json"
     bq_client = bigquery.Client()
 
@@ -59,14 +57,15 @@ st.markdown("""
         margin-bottom: 20px;
     }
     .exam-timer {
-        font-size: 1.5rem;
+        font-size: 1.6rem;
         font-weight: 600;
         color: #C87A7A;
         background-color: #FCEAEA;
-        padding: 10px;
+        padding: 12px;
         border-radius: 10px;
         text-align: center;
         margin-bottom: 15px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
     }
     </style>
 """, unsafe_allow_html=True)
@@ -125,7 +124,7 @@ if "mock_user_answers" not in st.session_state:
 if "mock_start_time" not in st.session_state:
     st.session_state.mock_start_time = None
 if "mock_duration_minutes" not in st.session_state:
-    st.session_state.mock_duration_minutes = 30
+    st.session_state.mock_duration_minutes = 60
 if "mock_completed" not in st.session_state:
     st.session_state.mock_completed = False
 
@@ -134,17 +133,17 @@ if "mock_completed" not in st.session_state:
 # =========================================================
 with st.sidebar:
     st.title("🌿 Ghibli Control")
-    app_mode = st.radio("เลือกพื้นที่ทำงาน:", [
-        "📝 Practice Mode (ฝึกฝนแยกหัวข้อ)", 
-        "⏱️ Mock Exam Simulator (จำลองการสอบ)", 
-        "📊 Performance & AI Insights (สถิติและจุดอ่อน)"
+    app_mode = st.radio("เลือกพื้นที่ทำงาน (Menu):", [
+        "📝 Practice Mode", 
+        "⏱️ Mock Exam Simulator", 
+        "📊 Performance & AI Insights"
     ])
     
     st.markdown("---")
-    st.header("🗂️ แฟลชการ์ดจดจำด่วน")
+    st.header("🗂️ Flashcards สะสมด่วน")
     if st.session_state.my_flashcards:
         for i, card in enumerate(st.session_state.my_flashcards):
-            st.info(f"📋 **ใบที่ {i+1}**\n{card}")
+            st.info(f"📋 **Card {i+1}**\n{card}")
     else:
         st.caption("ยังไม่มีแฟลชการ์ดสะสมจ้า")
 
@@ -152,53 +151,53 @@ if not global_pool:
     st.warning("⚠️ ไม่พบข้อมูลโจทย์ในคลังข้อสอบคลาวด์ BigQuery กรุณาตรวจสอบการรันไฟล์ pipeline.py จ้า!")
 else:
     # =========================================================
-    # 🗂️ หน้าที่ 1: Practice Mode (คืนค่าระบบ Topic Filter)
+    # 🗂️ หน้าที่ 1: Practice Mode (ฝึกฝนแยกหัวข้อ)
     # =========================================================
-    if app_mode == "📝 Practice Mode (ฝึกฝนแยกหัวข้อ)":
-        st.header("📝 โหมดฝึกฝนย่อยรายหัวข้อ")
+    if app_mode == "📝 Practice Mode":
+        st.header("📝 Practice Mode (ฝึกฝนรายหัวข้อ)")
         
         books_available = sorted(list(set([q['book'] for q in global_pool])))
-        selected_book = st.selectbox("1. เลือกเล่มหลักสูตร FRM:", ["ทั้งหมด"] + books_available)
+        selected_book = st.selectbox("1. เลือกเล่มหลักสูตร FRM Book:", ["Show All"] + books_available)
         
-        if selected_book != "ทั้งหมด":
+        if selected_book != "Show All":
             topics_available = sorted(list(set([q['topic'] for q in global_pool if q['book'] == selected_book])))
         else:
             topics_available = sorted(list(set([q['topic'] for q in global_pool])))
-        selected_topic = st.selectbox("2. เลือกหัวข้อเรียนรู้เฉพาะเจาะจง:", ["ทั้งหมด"] + topics_available)
+        selected_topic = st.selectbox("2. เลือกหัวข้อเฉพาะทาง Topic:", ["Show All"] + topics_available)
         
         filtered_pool = global_pool
-        if selected_book != "ทั้งหมด":
+        if selected_book != "Show All":
             filtered_pool = [q for q in filtered_pool if q['book'] == selected_book]
-        if selected_topic != "ทั้งหมด":
+        if selected_topic != "Show All":
             filtered_pool = [q for q in filtered_pool if q['topic'] == selected_topic]
             
         if not filtered_pool:
-            st.info("🍃 หัวข้อที่คุณเลือกยังไม่มีข้อสอบสไตล์ Business บรรจุอยู่ ลองเลือกหัวข้ออื่นดูนะจ้า")
+            st.info("🍃 หัวข้อที่คุณเลือกยังไม่มีข้อสอบบรรจุอยู่ ลองเลือกหัวข้ออื่นดูนะจ้า")
         else:
             if st.session_state.practice_idx >= len(filtered_pool):
                 st.session_state.practice_idx = 0
                 
             q = filtered_pool[st.session_state.practice_idx]
             
-            st.markdown(f"**📌 ข้อสอบข้อที่ {st.session_state.practice_idx + 1} / {len(filtered_pool)}**")
-            st.info(f"📚 วิชา: {q['book']} | 🎯 บทเรียน: {q['topic']} | ⚡ ระดับ: {q['difficulty']}")
+            st.markdown(f"**📌 Question {st.session_state.practice_idx + 1} / {len(filtered_pool)}**")
+            st.info(f"Book: {q['book']} | Topic: {q['topic']} | Difficulty: {q['difficulty']}")
             st.write(q['question_text'])
             
-            # 🛠️ แก้ไขเรียบร้อย: ช้อยส์ D สะอาดบริสุทธิ์ ไม่มีอักษรส่วนเกินหลุดรอด
+            # 🛠️ เคลียร์เศษข้อความออกเกลี้ยงชิ้นช้อยส์ D รันฉลุยแน่นอนครับ
             opts = [
                 f"A: {q['options'].get('A','')}", 
                 f"B: {q['options'].get('B','')}", 
                 f"C: {q['options'].get('C','')}", 
                 f"D: {q['options'].get('D','')}"
             ]
-            u_ans = st.radio("ระบุคำตอบที่แม่นยำที่สุดตามหลักการบริหารความเสี่ยง:", opts, index=0, key=f"prac_{q['question_id']}")
+            u_ans = st.radio("เลือกคำตอบที่แม่นยำที่สุดตามหลักบริหารความเสี่ยง:", opts, index=0, key=f"prac_{q['question_id']}")
             
             c1, c2 = st.columns(2)
             with c1:
-                if st.button("🚀 ส่งคำตอบตรวจทาน", use_container_width=True):
+                if st.button("🚀 ส่งคำตอบตรวจทาน (Submit)", use_container_width=True):
                     st.session_state.practice_submitted = True
             with c2:
-                if st.button("⏭️ สลับข้อถัดไป (สุ่ม)", use_container_width=True):
+                if st.button("⏭️ สลับข้อถัดไป (Next Random)", use_container_width=True):
                     st.session_state.practice_idx = random.randint(0, len(filtered_pool) - 1)
                     st.session_state.practice_submitted = False
                     st.session_state.practice_chat = []
@@ -217,13 +216,13 @@ else:
                         st.session_state.stats_history.append({"book": q['book'], "topic": q['topic'], "is_correct": 0, "recorded_id": q['question_id']})
                         
                 st.markdown(f"**📖 Detailed Explanation (EN):**\n{q['explanation_en']}")
-                st.markdown(f"**🇹🇭 คำอธิบายฉบับภาษาไทยสถาบันการเงิน:**\n{q['explanation_th']}")
+                st.markdown(f"**🇹🇭 คำอธิบายและเฉลยละเอียดภาษาไทย:**\n{q['explanation_th']}")
                 
             # กางแผงเครื่องมือช่วยคิดวิเคราะห์ 3 ชิ้นพร้อมกันแบบเปิดเผย
             st.markdown("---")
             st.subheader("🛠️ เครื่องมือช่วยคิดและวิเคราะห์ประจำข้อสอบ")
             
-            st.markdown('<div class="tool-card"><div class="tool-title">📚 ศัพท์เฉพาะประจำข้อ (Vocabulary)</div></div>', unsafe_allow_html=True)
+            st.markdown('<div class="tool-card"><div class="tool-title">📚 ศัพท์เฉพาะประจำข้อ (Key Vocabulary)</div></div>', unsafe_allow_html=True)
             if q['key_vocabulary']:
                 for item in q['key_vocabulary']:
                     st.markdown(f"🔹 **{item.get('word','')}** : {item.get('translation','')}")
@@ -231,11 +230,11 @@ else:
                 st.caption("ข้อนี้ไม่มีศัพท์เทคนิคยากเพิ่มเติมจ้า")
                 
             st.markdown('<div class="tool-card"><div class="tool-title">📝 บันทึกแฟลชการ์ดเข้ากล่องความจำ</div></div>', unsafe_allow_html=True)
-            txt_input = st.text_area("สรุปย่อหรือคัดสูตรเด็ดมาวางที่นี่:", key="note_area", placeholder="พิมพ์โน้ตส่วนตัว...")
-            if st.button("💾 เซฟแฟลชการ์ด"):
+            txt_input = st.text_area("สรุปย่อหรือคัดสูตรเด็ดมาวางที่นี่เพื่อบันทึกไปที่บอร์ดซ้ายมือ:", key="note_area", placeholder="พิมพ์โน้ตส่วนตัว...")
+            if st.button("💾 เซฟแฟลชการ์ด (Save Card)"):
                 if txt_input.strip():
                     st.session_state.my_flashcards.append(txt_input.strip())
-                    st.toast("บันทึกเรียบร้อยจ้า! 🌰")
+                    st.toast("บันทึกแฟลชการ์ดใบใหม่ขึ้นบอร์ดเรียบร้อยแล้วจ้า! 🌰")
                     st.rerun()
                     
             st.markdown('<div class="tool-card"><div class="tool-title">🧙‍♂️ ช่องแชทติวเตอร์เวทมนตร์ (AI Tutor)</div></div>', unsafe_allow_html=True)
@@ -252,18 +251,22 @@ else:
                 st.rerun()
 
     # =========================================================
-    # ⏱️ หน้าที่ 2: Mock Exam Simulator (ระบบจับเวลาและโควตาสัดส่วนจริง)
+    # ⏱️ หน้าที่ 2: Mock Exam Simulator (100 ข้อ & 4 ชั่วโมงเสถียร)
     # =========================================================
-    elif app_mode == "⏱️ Mock Exam Simulator (จำลองการสอบ)":
-        st.header("⏱️ ระบบจำลองการสอบสากลระดับสถาบัน (Mock Exam)")
-        st.caption("ระบบจะทำการดึงโจทย์แบบคัดเลือกกระจายสัดส่วนเนื้อหาตามน้ำหนักจริงของข้อสอบ GARP (20% Foundations, 20% Quant, 30% Markets, 30% Models)")
+    elif app_mode == "⏱️ Mock Exam Simulator":
+        st.header("⏱️ Mock Exam Simulator (จำลองการสอบแข่งขันจริง)")
+        st.caption("ดึงโจทย์สลับวิชาตามโควตาน้ำหนักสากลของ GARP (Foundations 20%, Quant 20%, Markets 30%, Models 30%)")
         
         if not st.session_state.mock_questions and not st.session_state.mock_completed:
-            st.subheader("🎲 ตั้งค่าการจัดชุดข้อสอบจำลอง")
-            exam_size = st.selectbox("เลือกจำนวนข้อสอบจำลอง:", [4, 10, 20], index=1)
-            duration = st.slider("เลือกเวลาทำข้อสอบ (นาที):", 5, 60, 20)
+            st.subheader("🎲 การตั้งค่าจัดชุดข้อสอบจำลองสนามจริง")
             
-            if st.button("🎬 เริ่มต้นการทำข้อสอบ (Start Exam)"):
+            exam_size = st.slider("เลือกจำนวนข้อสอบจำลอง (Select Questions Target):", min_value=1, max_value=100, value=20, step=1)
+            duration = st.slider("เลือกเวลาทำข้อสอบ (Select Time Limit ในหน่วยนาที):", min_value=5, max_value=240, value=60, step=5)
+            
+            h_label, m_label = divmod(duration, 60)
+            st.caption(f"💡 โควตาเวลาสอบสุทธิ: **{h_label} ชั่วโมง {m_label} นาที (Total: {duration} Mins)**")
+            
+            if st.button("🎬 เริ่มทำข้อสอบจำลอง (Start Exam)"):
                 w_b1 = max(1, int(exam_size * 0.20))
                 w_b2 = max(1, int(exam_size * 0.20))
                 w_b3 = max(1, int(exam_size * 0.30))
@@ -295,14 +298,15 @@ else:
             
             if remaining <= 0:
                 st.session_state.mock_completed = True
-                st.warning("🚨 หมดเวลาทำข้อสอบจำลองแล้ว! ระบบกำลังนำส่งคำตอบและตัดเกรดอัตโนมัติ...")
+                st.warning("🚨 หมดเวลาทำข้อสอบจำลองแล้ว! ระบบทำการรวบรวมและตัดเกรดส่งคะแนนอัตโนมัติ...")
                 st.rerun()
                 
-            mins, secs = divmod(int(remaining), 60)
-            st.markdown(f'<div class="exam-timer">⏳ เวลาคงเหลือสำหรับการทดสอบ: {mins:02d}:{secs:02d} นาที</div>', unsafe_allow_html=True)
+            hours, remainder = divmod(int(remaining), 3600)
+            mins, secs = divmod(remainder, 60)
+            st.markdown(f'<div class="exam-timer">⏳ Remaining Time: {hours:02d}:{mins:02d}:{secs:02d} ชั่วโมง</div>', unsafe_allow_html=True)
             
             for idx, mq in enumerate(st.session_state.mock_questions):
-                st.markdown(f"**📌 ข้อที่ {idx + 1}:** ({mq['book']})")
+                st.markdown(f"**📌 Question {idx + 1}:** ({mq['book']})")
                 st.write(mq['question_text'])
                 
                 m_opts = {
@@ -319,17 +323,17 @@ else:
                 st.session_state.mock_user_answers[mq['question_id']] = chosen[0]
                 st.markdown("---")
                 
-            if st.button("🏁 กดส่งกระดาษคำตอบ (Submit Exam)", use_container_width=True):
+            if st.button("🏁 กดส่งกระดาษคำตอบ (Submit Exam Sheet)", use_container_width=True):
                 st.session_state.mock_completed = True
                 st.rerun()
                 
         if st.session_state.mock_completed:
-            st.subheader("📊 ผลการวิเคราะห์คะแนนสอบจำลองสุทธิ")
+            st.subheader("📊 Mock Exam Result Summary (ผลการสอบรวม)")
             correct_count = 0
             mock_logs = []
             
             for mq in st.session_state.mock_questions:
-                u_pick = st.session_state.mock_user_answers.get(mq['question_id'], "ไม่ได้ฝนคำตอบ")
+                u_pick = st.session_state.mock_user_answers.get(mq['question_id'], "N/A")
                 is_correct = 1 if u_pick == mq['correct_option'] else 0
                 if is_correct: correct_count += 1
                 
@@ -337,58 +341,61 @@ else:
                     st.session_state.stats_history.append({"book": mq['book'], "topic": mq['topic'], "is_correct": is_correct, "recorded_id": f"M_{mq['question_id']}"})
                 
                 mock_logs.append({
-                    "วิชา": mq['book'],
-                    "คำตอบคุณ": u_pick,
-                    "เฉลยจริง": mq['correct_option'],
-                    "ผลลัพธ์": "✅ ถูกต้อง" if is_correct else "❌ ผิดพลาด"
+                    "Curriculum Book": mq['book'],
+                    "Your Pick": u_pick,
+                    "Correct Ans": mq['correct_option'],
+                    "Status": "✅ Correct" if is_correct else "❌ Incorrect"
                 })
                 
-            st.metric("คะแนนที่ได้รวม", f"{correct_count} / {len(st.session_state.mock_questions)} ข้อ", 
-                      delta=f"คิดเป็น {int(correct_count/len(st.session_state.mock_questions)*100)}%")
+            st.metric("Total Score", f"{correct_count} / {len(st.session_state.mock_questions)} ข้อ", 
+                      delta=f"Accuracy Rate: {int(correct_count/len(st.session_state.mock_questions)*100)}%")
             
             st.table(pd.DataFrame(mock_logs))
             
-            if st.button("🔄 ล้างค่าเพื่อจัดชุดทำข้อสอบรอบใหม่"):
+            if st.button("🔄 ล้างหน้าจอเพื่อเริ่มทำชุดข้อสอบใหม่ (Reset Mock)"):
                 st.session_state.mock_questions = []
                 st.session_state.mock_user_answers = {}
                 st.session_state.mock_completed = False
                 st.rerun()
 
     # =========================================================
-    # 📊 หน้าที่ 3: Performance & AI Insights (บอร์ดสถิติ + คำแนะนำจุดอ่อน)
+    # 📊 หน้าที่ 3: Performance & AI Insights (สยบบั๊ก KeyError สมบูรณ์)
     # =========================================================
-    elif app_mode == "📊 Performance & AI Insights (สถิติและจุดอ่อน)":
-        st.header("📊 แผงควบคุมสถิติวิเคราะห์ประสิทธิภาพ (Analytics Board)")
-        st.caption("แดชบอร์ดประมวลผลความแม่นยำรายวิชา เพื่อจับตาทิศทางการเตรียมความพร้อมของคุณนาธานแบบเรียลไทม์")
+    elif app_mode == "📊 Performance & AI Insights":
+        st.header("📊 Performance Dashboard & AI Weakness Analysis")
+        st.caption("แดชบอร์ดประมวลผลแยกตามกลุ่มวิชา เพื่อวิเคราะห์หาจุดบกพร่องเชิงลึกรายบุคคล")
         
         if not st.session_state.stats_history:
-            st.info("🍃 ระบบยังไม่มีประวัติการทำข้อสอบของคุณนาธานในเซสชันนี้ ลองไปลุยโหมดฝึกฝนหรือทำข้อสอบจำลองเพื่อเก็บข้อมูลก่อนนะจ้า")
+            st.info("🍃 แผงสถิติยังไม่มีข้อมูลสะสมจ้า ลองเข้าทำข้อสอบจำลองหรือโหมดฝึกฝนก่อนเพื่อให้ระบบบันทึกคะแนนนะจ้า")
         else:
             df = pd.DataFrame(st.session_state.stats_history)
-            summary_df = df.groupby('book').agg(
-                จำนวนที่ทำ=('is_correct', 'count'),
-                ตอบถูกต้อง=('is_correct', 'sum')
-            ).reset_index()
-            summary_df['เปอร์เซ็นต์ความแม่นยำ'] = (summary_df['ตอบถูกต้อง'] / summary_df['จำนวนที่ทำ'] * 100).round(1)
             
-            st.subheader("📈 สรุปแยกรายวิชาหลักสูตร")
+            # 🚀 [THE ULTIMATE FIX] จัดกลุ่มด้วยคอลัมน์ภาษาอังกฤษแท้ ป้องกัน KeyError ตัวแดงบนเซิร์ฟเวอร์คลาวด์ 100%
+            summary_df = df.groupby('book')['is_correct'].agg(['count', 'sum']).reset_index()
+            summary_df.columns = ['Book', 'Total Questions', 'Correct Answers']
+            
+            # คำนวณร้อยละความแม่นยำด้วยตัวแปรภาษาอังกฤษสากล
+            summary_df['Accuracy (%)'] = (summary_df['Correct Answers'] / summary_df['Total Questions'] * 100).round(1)
+            
+            st.subheader("📈 Summary Table (สรุปตารางรายวิชาหลักสูตร)")
             st.dataframe(summary_df, use_container_width=True)
             
-            fig = px.bar(summary_df, x='book', y='เปอร์เซ็นต์ความแม่นยำ', 
-                         title="📊 อัตราความแม่นยำแยกตามเล่มหลักสูตร (%)",
-                         labels={'book': 'วิชาหลักสูตร', 'เปอร์เซ็นต์ความแม่นยำ': 'เปอร์เซ็นต์ความเที่ยงตรง (%)'},
-                         color='เปอร์เซ็นต์ความแม่นยำ', color_continuous_scale=px.colors.sequential.Mint)
+            # แสดงแผนภูมิแท่งความเที่ยงตรงด้วยสีกิบลิมินิมอลสบายตา
+            fig = px.bar(summary_df, x='Book', y='Accuracy (%)', 
+                         title="📊 Accuracy Rate by Curriculum Book (%)",
+                         labels={'Book': 'Curriculum วิชาหลักสูตร', 'Accuracy (%)': 'Accuracy ความแม่นยำ (%)'},
+                         color='Accuracy (%)', color_continuous_scale=px.colors.sequential.Mint)
             fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
             st.plotly_chart(fig, use_container_width=True)
             
             st.markdown("---")
-            st.subheader("🧙‍♂️ กล่องวินิจฉัยจุดอ่อนและแผนการเรียนจาก AI ติวเตอร์")
-            st.write("กดปุ่มด้านล่างเพื่อสั่งให้ระบบวิเคราะห์ประวัติการทำข้อสอบทั้งหมด และคำนวณหาจุดบกพร่องตามน้ำหนักความยากของข้อสอบจริง")
+            st.subheader("🧙‍♂️ AI Weakness Auditor (กล่องคำแนะนำแผนการเรียนจากติวเตอร์กิบลิ)")
+            st.write("กดปุ่มด้านล่างเพื่อสั่งให้ระบบวิเคราะห์ประวัติการสอบทั้งหมดของคุณ และจัดเตรียมแนวทางการทบทวนวิชาเฉพาะด้าน")
             
-            if st.button("✨ ให้ AI สรุปรายงานจุดอ่อนและกลยุทธ์ทบทวน"):
+            if st.button("✨ เจาะลึกแผนการอ่านหนังสือ (Generate AI Insights Report)"):
                 stats_text = ""
                 for index, row in summary_df.iterrows():
-                    stats_text += f"- วิชา {row['book']}: ทำไป {row['จำนวนที่ทำ']} ข้อ, ตอบถูก {row['ตอบถูกต้อง']} ข้อ (ความแม่นยำ {row['เปอร์เซ็นต์ความแม่นยำ']}%)\n"
+                    stats_text += f"- Book '{row['Book']}': Answered {row['Total Questions']} questions, Correct {row['Correct Answers']} (Accuracy: {row['Accuracy (%)']}%)\n"
                     
                 ai_analysis_prompt = f"""
                 You are an elite, warm Ghibli-themed FRM Risk Management Executive and a Senior Tutor. 
@@ -403,15 +410,15 @@ else:
                 3. Deliver the advice in a very warm, supportive, peer-like tone mixed with financial expertise. Use standard professional Thai banking terminology where appropriate. End sentences with 'ครับจ้า'.
                 """
                 
-                with st.spinner("AI กำลังกางแผนที่หลักสูตรและจัดทำแผนการทบทวนสุดพิเศษให้คุณนาธาน..."):
+                with st.spinner("AI กำลังคำนวณสูตรและประมวลผลรายงานพิเศษให้คุณนาธานสักครู่จ้า..."):
                     try:
                         ai_report = ai_client.models.generate_content(
                             model='gemini-3.1-flash-lite',
                             contents=ai_analysis_prompt
                         )
                         st.markdown('<div class="tool-card">', unsafe_allow_html=True)
-                        st.markdown("### 📜 รายงานผลสัมฤทธิ์และกลยุทธ์เตรียมสอบฉบับเฉพาะบุคคล")
+                        st.markdown("### 📜 รายงานผลสัมฤทธิ์และกลยุทธ์เตรียมสอบฉบับเฉพาะบุคคล (AI Study Report)")
                         st.write(ai_report.text)
                         st.markdown('</div>', unsafe_allow_html=True)
                     except Exception as e:
-                        st.error(f"ระบบเชื่อมต่อ AI เกิดอาการสะดุด: {e}")
+                        st.error(f"ระบบ AI ขัดข้องชั่วคราว: {e}")
