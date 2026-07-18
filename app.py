@@ -158,7 +158,7 @@ with st.sidebar:
         "📝 Practice Mode", 
         "⏱️ Mock Exam Simulator", 
         "📊 Performance & AI Insights",
-        "🗂️ Flashcard Studio" # 🛠️ ย้าย Flashcard มาเป็นหน้าเฉพาะกิจ
+        "🗂️ Flashcard Studio"
     ])
 
 # ดึงประวัติคำนวณโอกาสสอบผ่าน (Reward System)
@@ -181,6 +181,18 @@ with st.sidebar:
         st.markdown("🌰 **เมล็ดโอ๊ค Totoro**\n(เพิ่งเริ่มออกเดินทาง เก็บเกี่ยวประสบการณ์ต่อไปนะ!)")
     else:
         st.caption("เริ่มทำโจทย์สะสมความแม่นยำเพื่อรับการประเมินโอกาสสอบผ่านจ้า...")
+
+    st.markdown("---")
+    st.header("🗂️ Flashcards สะสมด่วน")
+    if st.session_state.my_flashcards:
+        for i, card in enumerate(st.session_state.my_flashcards):
+            # 🛠️ [BUG FIX] แยกการโชว์ผลระหว่างการ์ดแบบเก่า (ข้อความ) และการ์ดแบบใหม่ (ดึงเฉพาะด้านหน้ามาโชว์)
+            if isinstance(card, dict):
+                st.info(f"📋 **Card {i+1}**\n{card.get('front', '')}")
+            else:
+                st.info(f"📋 **Card {i+1}**\n{card}")
+    else:
+        st.caption("ยังไม่มีแฟลชการ์ดสะสมจ้า")
 
 if not global_pool:
     st.warning("⚠️ ไม่พบข้อมูลโจทย์ในคลังข้อสอบคลาวด์ BigQuery กรุณาตรวจสอบการรันไฟล์ pipeline.py จ้า!")
@@ -257,7 +269,6 @@ else:
             else:
                 st.caption("ข้อนี้ไม่มีศัพท์เทคนิคยากเพิ่มเติมจ้า")
                 
-            # 🛠️ เปลี่ยนเครื่องมือจด Flashcard ใน Practice Mode ให้รับ หน้า-หลัง
             st.markdown('<div class="tool-card"><div class="tool-title">📝 บันทึกเข้า Flashcard Studio</div></div>', unsafe_allow_html=True)
             cf1, cf2 = st.columns(2)
             with cf1:
@@ -348,7 +359,6 @@ else:
                 st.markdown("---")
                 
             if st.button("🏁 กดส่งกระดาษคำตอบ (Submit Exam Sheet)", use_container_width=True):
-                # 🛠️ บันทึก % ความแม่นยำรวมของการสอบจำลองครั้งนี้เก็บเข้าประวัติกราฟเส้น
                 correct_c = sum([1 for mq in st.session_state.mock_questions if st.session_state.mock_user_answers.get(mq['question_id']) == mq['correct_option']])
                 mock_acc = (correct_c / len(st.session_state.mock_questions)) * 100
                 st.session_state.mock_scores.append({
@@ -418,7 +428,6 @@ else:
                         radar_data.append({"Book": b, "Accuracy (%)": 0.0})
                 radar_df = pd.DataFrame(radar_data)
                 
-                # ปรับโครงสร้างลากเส้นปิดรูปเรดาร์
                 r_vals = radar_df['Accuracy (%)'].tolist()
                 r_vals.append(r_vals[0])
                 theta_vals = radar_df['Book'].tolist()
@@ -438,7 +447,7 @@ else:
                 
                 fig_radar.update_layout(
                     polar=dict(radialaxis=dict(visible=True, range=[0, 100])),
-                    margin=dict(l=120, r=120, t=50, b=50), # 🛠️ กางขอบ margin ให้กว้างสุด ๆ ป้องกันชื่อวิชายาวตกขอบ
+                    margin=dict(l=120, r=120, t=50, b=50), 
                     paper_bgcolor='rgba(0,0,0,0)',
                     plot_bgcolor='rgba(0,0,0,0)',
                     showlegend=False
@@ -499,7 +508,6 @@ else:
         st.header(f"🗂️ Flashcard Studio (คลังความจำเฉพาะตัวของ {current_user})")
         st.caption("พื้นที่สร้างและทบทวนแฟลชการ์ดสไตล์กระดาษจดโน้ตน่ารัก ๆ เพื่อสกัดจุดยากไว้ท่องจำก่อนเข้าห้องสอบ ✍️")
         
-        # 🛠️ เครื่องมือสร้างการ์ด (Generator)
         st.markdown('<div class="tool-card"><div class="tool-title">✨ สร้าง Flashcard ใบใหม่</div>', unsafe_allow_html=True)
         col1, col2 = st.columns(2)
         with col1:
@@ -518,13 +526,12 @@ else:
         st.markdown("---")
         st.subheader("📚 แผงตาราง Flashcard สะสมของคุณ")
         
-        # 🛠️ ดึงเฉพาะการ์ดของยูสเซอร์ปัจจุบันมากางโชว์บนบอร์ด
-        user_cards = [c for c in st.session_state.my_flashcards if c.get("user") == current_user]
+        # 🛠️ [BUG FIX] ดักประเภทข้อมูล dict ป้องกัน TypeError จากของเก่า
+        user_cards = [c for c in st.session_state.my_flashcards if isinstance(c, dict) and c.get("user") == current_user]
         
         if not user_cards:
             st.info("ยังไม่มีการ์ดในคลังจ้า ลองพิมพ์คำศัพท์หรือสูตรเด็ด ๆ ด้านบนเพื่อสร้างใบแรกดูสิ!")
         else:
-            # จัดเรียงกางการ์ดเป็นกริดทีละ 3 ใบต่อแถว
             for i in range(0, len(user_cards), 3):
                 cols = st.columns(3)
                 for j, c in enumerate(user_cards[i:i+3]):
