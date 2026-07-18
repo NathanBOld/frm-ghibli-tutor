@@ -65,7 +65,6 @@ st.markdown("""
         border-radius: 10px;
         text-align: center;
         margin-bottom: 15px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
     }
     </style>
 """, unsafe_allow_html=True)
@@ -113,8 +112,9 @@ if "practice_submitted" not in st.session_state:
     st.session_state.practice_submitted = False
 if "practice_chat" not in st.session_state:
     st.session_state.practice_chat = []
-if "stats_history" not in st.session_state:
-    st.session_state.stats_history = []
+# คลังสถิติส่วนกลางรองรับการระบุชื่อรายบุคคล
+if "global_stats_log" not in st.session_state:
+    st.session_state.global_stats_log = []
 
 # ตัวแปรสำหรับโหมดจำลองสอบ (Mock Exam)
 if "mock_questions" not in st.session_state:
@@ -129,10 +129,15 @@ if "mock_completed" not in st.session_state:
     st.session_state.mock_completed = False
 
 # =========================================================
-# 🧭 5. แผงควบคุมด้านข้างและเมนูสลับหน้า (Sidebar Navigation)
+# 🧭 5. แผงควบคุมด้านข้างและระบบแยกชื่อรายบุคคล (Sidebar Navigation)
 # =========================================================
 with st.sidebar:
     st.title("🌿 Ghibli Control")
+    
+    # 🛠️ [UPGRADE] ช่องแยกชื่อรายบุคคล
+    current_user = st.text_input("👤 ชื่อผู้ใช้งาน (User Name):", value="Nathan").strip()
+    
+    st.markdown("---")
     app_mode = st.radio("เลือกพื้นที่ทำงาน (Menu):", [
         "📝 Practice Mode", 
         "⏱️ Mock Exam Simulator", 
@@ -147,6 +152,14 @@ with st.sidebar:
     else:
         st.caption("ยังไม่มีแฟลชการ์ดสะสมจ้า")
 
+# ดึงประวัติเฉพาะของ User ปัจจุบันออกมากางเพื่อนับคะแนนโชว์ใน Sidebar
+user_history = [d for d in st.session_state.global_stats_log if d["user"] == current_user]
+user_correct_total = sum([d["is_correct"] for d in user_history])
+
+with st.sidebar:
+    st.markdown("---")
+    st.metric(f"คะแนนสะสมของ {current_user}", f"{user_correct_total} ข้อ")
+
 if not global_pool:
     st.warning("⚠️ ไม่พบข้อมูลโจทย์ในคลังข้อสอบคลาวด์ BigQuery กรุณาตรวจสอบการรันไฟล์ pipeline.py จ้า!")
 else:
@@ -154,7 +167,7 @@ else:
     # 🗂️ หน้าที่ 1: Practice Mode (ฝึกฝนแยกหัวข้อ)
     # =========================================================
     if app_mode == "📝 Practice Mode":
-        st.header("📝 Practice Mode (ฝึกฝนรายหัวข้อ)")
+        st.header(f"📝 Practice Mode (ผู้ใช้งานปัจจุบัน: {current_user})")
         
         books_available = sorted(list(set([q['book'] for q in global_pool])))
         selected_book = st.selectbox("1. เลือกเล่มหลักสูตร FRM Book:", ["Show All"] + books_available)
@@ -183,13 +196,10 @@ else:
             st.info(f"Book: {q['book']} | Topic: {q['topic']} | Difficulty: {q['difficulty']}")
             st.write(q['question_text'])
             
-            # 🛠️ เคลียร์เศษข้อความออกเกลี้ยงชิ้นช้อยส์ D รันฉลุยแน่นอนครับ
-            opts = [
-                f"A: {q['options'].get('A','')}", 
-                f"B: {q['options'].get('B','')}", 
-                f"C: {q['options'].get('C','')}", 
-                f"D: {q['options'].get('D','')}"
-            ]
+            opts = [f"A: {q['options'].get('A','')}", f"B: {q['options'].get('B','')}", f"C: {q['options'].get('C','')}", f"D: {q['options'].get('D','') bricks')}" if ' bricks' in q['options'].get('D','') else f"D: {q['options'].get('D','')}"]
+            # ล้างคำว่า bricks ที่อาจค้างอยู่ปลายสายข้อมูล
+            opts[3] = opts[3].replace(" bricks')", "")
+            
             u_ans = st.radio("เลือกคำตอบที่แม่นยำที่สุดตามหลักบริหารความเสี่ยง:", opts, index=0, key=f"prac_{q['question_id']}")
             
             c1, c2 = st.columns(2)
@@ -208,17 +218,16 @@ else:
                 final_choice = u_ans[0]
                 if final_choice == q['correct_option']:
                     st.success(f"✨ ยอดเยี่ยมมากครับเฉลยถูกต้องคือข้อ {q['correct_option']}!")
-                    if not any(d.get('recorded_id') == q['question_id'] for d in st.session_state.stats_history):
-                        st.session_state.stats_history.append({"book": q['book'], "topic": q['topic'], "is_correct": 1, "recorded_id": q['question_id']})
+                    if not any(d.get('recorded_id') == q['question_id'] and d["user"] == current_user for d in st.session_state.global_stats_log):
+                        st.session_state.global_stats_log.append({"user": current_user, "book": q['book'], "topic": q['topic'], "is_correct": 1, "recorded_id": q['question_id'], "timestamp": time.time()})
                 else:
                     st.error(f"ผิดพลาดเล็กน้อยจ้า เฉลยที่แท้จริงคือข้อ {q['correct_option']}")
-                    if not any(d.get('recorded_id') == q['question_id'] for d in st.session_state.stats_history):
-                        st.session_state.stats_history.append({"book": q['book'], "topic": q['topic'], "is_correct": 0, "recorded_id": q['question_id']})
+                    if not any(d.get('recorded_id') == q['question_id'] and d["user"] == current_user for d in st.session_state.global_stats_log):
+                        st.session_state.global_stats_log.append({"user": current_user, "book": q['book'], "topic": q['topic'], "is_correct": 0, "recorded_id": q['question_id'], "timestamp": time.time()})
                         
                 st.markdown(f"**📖 Detailed Explanation (EN):**\n{q['explanation_en']}")
                 st.markdown(f"**🇹🇭 คำอธิบายและเฉลยละเอียดภาษาไทย:**\n{q['explanation_th']}")
                 
-            # กางแผงเครื่องมือช่วยคิดวิเคราะห์ 3 ชิ้นพร้อมกันแบบเปิดเผย
             st.markdown("---")
             st.subheader("🛠️ เครื่องมือช่วยคิดและวิเคราะห์ประจำข้อสอบ")
             
@@ -239,8 +248,7 @@ else:
                     
             st.markdown('<div class="tool-card"><div class="tool-title">🧙‍♂️ ช่องแชทติวเตอร์เวทมนตร์ (AI Tutor)</div></div>', unsafe_allow_html=True)
             for m in st.session_state.practice_chat:
-                with st.chat_message(m["role"]): 
-                    st.write(m["text"])
+                with st.chat_message(m["role"]): st.write(m["text"])
             c_input = st.chat_input("💬 สอบถามข้อสงสัยเกี่ยวกับสูตรคำนวณหรือตรรกะข้อนี้...")
             if c_input:
                 st.session_state.practice_chat.append({"role": "user", "text": c_input})
@@ -251,15 +259,13 @@ else:
                 st.rerun()
 
     # =========================================================
-    # ⏱️ หน้าที่ 2: Mock Exam Simulator (100 ข้อ & 4 ชั่วโมงเสถียร)
+    # ⏱️ หน้าที่ 2: Mock Exam Simulator (100 ข้อ & 4 ชั่วโมงเต็ม)
     # =========================================================
     elif app_mode == "⏱️ Mock Exam Simulator":
-        st.header("⏱️ Mock Exam Simulator (จำลองการสอบแข่งขันจริง)")
-        st.caption("ดึงโจทย์สลับวิชาตามโควตาน้ำหนักสากลของ GARP (Foundations 20%, Quant 20%, Markets 30%, Models 30%)")
+        st.header(f"⏱️ Mock Exam Simulator (ผู้ใช้งานปัจจุบัน: {current_user})")
         
         if not st.session_state.mock_questions and not st.session_state.mock_completed:
             st.subheader("🎲 การตั้งค่าจัดชุดข้อสอบจำลองสนามจริง")
-            
             exam_size = st.slider("เลือกจำนวนข้อสอบจำลอง (Select Questions Target):", min_value=1, max_value=100, value=20, step=1)
             duration = st.slider("เลือกเวลาทำข้อสอบ (Select Time Limit ในหน่วยนาที):", min_value=5, max_value=240, value=60, step=5)
             
@@ -309,13 +315,7 @@ else:
                 st.markdown(f"**📌 Question {idx + 1}:** ({mq['book']})")
                 st.write(mq['question_text'])
                 
-                m_opts = {
-                    "A": f"A: {mq['options'].get('A','')}",
-                    "B": f"B: {mq['options'].get('B','')}",
-                    "C": f"C: {mq['options'].get('C','')}",
-                    "D": f"D: {mq['options'].get('D','')}"
-                }
-                
+                m_opts = {"A": f"A: {mq['options'].get('A','')}", "B": f"B: {mq['options'].get('B','')}", "C": f"C: {mq['options'].get('C','')}", "D": f"D: {mq['options'].get('D','')}"}
                 current_saved = st.session_state.mock_user_answers.get(mq['question_id'], "A")
                 saved_idx = list(m_opts.keys()).index(current_saved) if current_saved in m_opts else 0
                 
@@ -337,19 +337,12 @@ else:
                 is_correct = 1 if u_pick == mq['correct_option'] else 0
                 if is_correct: correct_count += 1
                 
-                if not any(d.get('recorded_id') == f"M_{mq['question_id']}" for d in st.session_state.stats_history):
-                    st.session_state.stats_history.append({"book": mq['book'], "topic": mq['topic'], "is_correct": is_correct, "recorded_id": f"M_{mq['question_id']}"})
+                if not any(d.get('recorded_id') == f"M_{mq['question_id']}" and d["user"] == current_user for d in st.session_state.global_stats_log):
+                    st.session_state.global_stats_log.append({"user": current_user, "book": mq['book'], "topic": mq['topic'], "is_correct": is_correct, "recorded_id": f"M_{mq['question_id']}", "timestamp": time.time()})
                 
-                mock_logs.append({
-                    "Curriculum Book": mq['book'],
-                    "Your Pick": u_pick,
-                    "Correct Ans": mq['correct_option'],
-                    "Status": "✅ Correct" if is_correct else "❌ Incorrect"
-                })
+                mock_logs.append({"Curriculum Book": mq['book'], "Your Pick": u_pick, "Correct Ans": mq['correct_option'], "Status": "✅ Correct" if is_correct else "❌ Incorrect"})
                 
-            st.metric("Total Score", f"{correct_count} / {len(st.session_state.mock_questions)} ข้อ", 
-                      delta=f"Accuracy Rate: {int(correct_count/len(st.session_state.mock_questions)*100)}%")
-            
+            st.metric("Total Score", f"{correct_count} / {len(st.session_state.mock_questions)} ข้อ", delta=f"Accuracy Rate: {int(correct_count/len(st.session_state.mock_questions)*100)}%")
             st.table(pd.DataFrame(mock_logs))
             
             if st.button("🔄 ล้างหน้าจอเพื่อเริ่มทำชุดข้อสอบใหม่ (Reset Mock)"):
@@ -359,38 +352,67 @@ else:
                 st.rerun()
 
     # =========================================================
-    # 📊 หน้าที่ 3: Performance & AI Insights (สยบบั๊ก KeyError สมบูรณ์)
+    # 📊 หน้าที่ 3: Performance & AI Insights (กู้คืนกราฟ Radar + Progress กราฟเส้น)
     # =========================================================
     elif app_mode == "📊 Performance & AI Insights":
-        st.header("📊 Performance Dashboard & AI Weakness Analysis")
-        st.caption("แดชบอร์ดประมวลผลแยกตามกลุ่มวิชา เพื่อวิเคราะห์หาจุดบกพร่องเชิงลึกรายบุคคล")
+        st.header(f"📊 Performance Dashboard & AI Insights (ผู้ใช้งานปัจจุบัน: {current_user})")
         
-        if not st.session_state.stats_history:
-            st.info("🍃 แผงสถิติยังไม่มีข้อมูลสะสมจ้า ลองเข้าทำข้อสอบจำลองหรือโหมดฝึกฝนก่อนเพื่อให้ระบบบันทึกคะแนนนะจ้า")
+        if not user_history:
+            st.info(f"🍃 แผงสถิติยังไม่มีข้อมูลสะสมของ {current_user} จ้า ลองเข้าทำข้อสอบจำลองหรือโหมดฝึกฝนก่อนเพื่อให้ระบบบันทึกคะแนนนะจ้า")
         else:
-            df = pd.DataFrame(st.session_state.stats_history)
+            df = pd.DataFrame(user_history).sort_values(by="timestamp").reset_index(drop=True)
             
-            # 🚀 [THE ULTIMATE FIX] จัดกลุ่มด้วยคอลัมน์ภาษาอังกฤษแท้ ป้องกัน KeyError ตัวแดงบนเซิร์ฟเวอร์คลาวด์ 100%
+            # ตารางสรุปพื้นฐานรายวิชา
             summary_df = df.groupby('book')['is_correct'].agg(['count', 'sum']).reset_index()
             summary_df.columns = ['Book', 'Total Questions', 'Correct Answers']
-            
-            # คำนวณร้อยละความแม่นยำด้วยตัวแปรภาษาอังกฤษสากล
             summary_df['Accuracy (%)'] = (summary_df['Correct Answers'] / summary_df['Total Questions'] * 100).round(1)
             
-            st.subheader("📈 Summary Table (สรุปตารางรายวิชาหลักสูตร)")
+            st.subheader("📈 Summary Table (สรุปตารางวิเคราะห์รายวิชา)")
             st.dataframe(summary_df, use_container_width=True)
             
-            # แสดงแผนภูมิแท่งความเที่ยงตรงด้วยสีกิบลิมินิมอลสบายตา
-            fig = px.bar(summary_df, x='Book', y='Accuracy (%)', 
-                         title="📊 Accuracy Rate by Curriculum Book (%)",
-                         labels={'Book': 'Curriculum วิชาหลักสูตร', 'Accuracy (%)': 'Accuracy ความแม่นยำ (%)'},
-                         color='Accuracy (%)', color_continuous_scale=px.colors.sequential.Mint)
-            fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
-            st.plotly_chart(fig, use_container_width=True)
+            col_graph1, col_graph2 = st.columns(2)
             
+            # 🕸️ 1. กราฟเรดาร์ (Radar Chart) แยกตามหัวข้อวิชาหลักตามที่กำหนดเดิม
+            with col_graph1:
+                st.markdown("#### 🕸️ Radar Chart Analysis (แยกตามหัวข้อวิชาหลัก)")
+                
+                # ตรวจสอบและเติมโครงสร้างให้ครบ 4 เล่ม เพื่อให้แกนเรดาร์วาดรูปได้สมมาตรสวยงาม
+                all_4_books = ["Foundations of Risk Management", "Quantitative Analysis", "Financial Markets and Products", "Valuation and Risk Models"]
+                radar_data = []
+                for b in all_4_books:
+                    match = summary_df[summary_df['Book'] == b]
+                    if not match.empty:
+                        radar_data.append({"Book": b, "Accuracy (%)": match.iloc[0]['Accuracy (%)']})
+                    else:
+                        radar_data.append({"Book": b, "Accuracy (%)": 0.0}) # ถ้าวิชายังไม่ได้ทำ ให้ขึ้นจุด 0 ไว้ก่อน
+                radar_df = pd.DataFrame(radar_data)
+                
+                fig_radar = px.line_polar(radar_df, r='Accuracy (%)', theta='Book', line_close=True,
+                                          title="อัตราความแม่นยำรายวิชา (%)",
+                                          color_discrete_sequence=['#8F9E8B'])
+                fig_radar.update_traces(fill='adjacent')
+                fig_radar.update_layout(paper_bgcolor='rgba(0,0,0,0)')
+                st.plotly_chart(fig_radar, use_container_width=True)
+                
+            # 📈 2. กราฟความคืบหน้าของการทำข้อสอบแต่ละครั้ง (Cumulative Progress Chart)
+            with col_graph2:
+                st.markdown("#### 📈 Cumulative Progress Chart (ความคืบหน้าแต่ละครั้ง)")
+                
+                # คำนวณหาค่าเฉลยสะสมวิ่งไปเรื่อย ๆ (Running Expanding Mean) ของการกดตอบแต่ละครั้ง
+                df['Attempt Number'] = df.index + 1
+                df['Running Accuracy (%)'] = (df['is_correct'].expanding().mean() * 100).round(1)
+                
+                fig_progress = px.line(df, x='Attempt Number', y='Running Accuracy (%)',
+                                       title="เส้นการพัฒนาความแม่นยำสะสมตามเวลาการส่งคำตอบ",
+                                       labels={'Attempt Number': 'จำนวนครั้งที่ทำข้อสอบ (Attempt)', 'Running Accuracy (%)': 'ความแม่นยำสะสม (%)'},
+                                       markers=True, color_discrete_sequence=['#C87A7A'])
+                fig_progress.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
+                st.plotly_chart(fig_progress, use_container_width=True)
+                
+            # 🧙‍♂️ แท่นวิเคราะห์จุดอ่อนดึงปัญญาประดิษฐ์ (AI Weakness Auditor)
             st.markdown("---")
-            st.subheader("🧙‍♂️ AI Weakness Auditor (กล่องคำแนะนำแผนการเรียนจากติวเตอร์กิบลิ)")
-            st.write("กดปุ่มด้านล่างเพื่อสั่งให้ระบบวิเคราะห์ประวัติการสอบทั้งหมดของคุณ และจัดเตรียมแนวทางการทบทวนวิชาเฉพาะด้าน")
+            st.subheader("🧙‍♂️ AI Weakness Auditor (กล่องสรุปรายงานเฉพาะบุคคล)")
+            st.write(f"กดปุ่มด้านล่างเพื่อให้ AI ช่วยสแกนประวัติการทำข้อสอบทั้งหมดของ {current_user} และชี้เป้าจุดบกพร่องเชิงลึก")
             
             if st.button("✨ เจาะลึกแผนการอ่านหนังสือ (Generate AI Insights Report)"):
                 stats_text = ""
@@ -401,23 +423,20 @@ else:
                 You are an elite, warm Ghibli-themed FRM Risk Management Executive and a Senior Tutor. 
                 Analyze Nathan's current performance metrics below and generate a professional, highly strategic study guidance report.
                 
-                NATHAN'S ACCURACY PROFILE:
+                USER PROFILE: Name is {current_user}.
+                ACCURACY METRICS FOR AUDIT:
                 {stats_text}
                 
-                INSTRUCTIONS FOR REPORT STRUCTURE:
-                1. Identify which books require immediate critical attention based on low accuracy scores.
-                2. Provide concrete risk-practitioner advice (e.g., focus more on Delta hedging formulas, OLS diagnostics, or Basel framework depending on the weak fields).
-                3. Deliver the advice in a very warm, supportive, peer-like tone mixed with financial expertise. Use standard professional Thai banking terminology where appropriate. End sentences with 'ครับจ้า'.
+                INSTRUCTIONS:
+                1. Identify critical structural weak areas immediately.
+                2. Give warm practitioner guidance with banking context. Use professional Thai financial vocabulary mixed with warm friendly peer-like tone. End sentences with 'ครับจ้า'.
                 """
                 
-                with st.spinner("AI กำลังคำนวณสูตรและประมวลผลรายงานพิเศษให้คุณนาธานสักครู่จ้า..."):
+                with st.spinner("AI กำลังกางแผนที่หลักสูตรและจัดทำแผนการทบทวนสุดพิเศษให้คุณ..."):
                     try:
-                        ai_report = ai_client.models.generate_content(
-                            model='gemini-3.1-flash-lite',
-                            contents=ai_analysis_prompt
-                        )
+                        ai_report = ai_client.models.generate_content(model='gemini-3.1-flash-lite', contents=ai_analysis_prompt)
                         st.markdown('<div class="tool-card">', unsafe_allow_html=True)
-                        st.markdown("### 📜 รายงานผลสัมฤทธิ์และกลยุทธ์เตรียมสอบฉบับเฉพาะบุคคล (AI Study Report)")
+                        st.markdown(f"### 📜 รายงานผลสัมฤทธิ์และกลยุทธ์เตรียมสอบฉบับเฉพาะของ {current_user}")
                         st.write(ai_report.text)
                         st.markdown('</div>', unsafe_allow_html=True)
                     except Exception as e:
