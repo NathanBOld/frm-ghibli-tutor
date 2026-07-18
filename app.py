@@ -112,7 +112,6 @@ if "practice_submitted" not in st.session_state:
     st.session_state.practice_submitted = False
 if "practice_chat" not in st.session_state:
     st.session_state.practice_chat = []
-# คลังสถิติส่วนกลางรองรับการระบุชื่อรายบุคคล
 if "global_stats_log" not in st.session_state:
     st.session_state.global_stats_log = []
 
@@ -134,7 +133,6 @@ if "mock_completed" not in st.session_state:
 with st.sidebar:
     st.title("🌿 Ghibli Control")
     
-    # 🛠️ [UPGRADE] ช่องแยกชื่อรายบุคคล
     current_user = st.text_input("👤 ชื่อผู้ใช้งาน (User Name):", value="Nathan").strip()
     
     st.markdown("---")
@@ -152,7 +150,6 @@ with st.sidebar:
     else:
         st.caption("ยังไม่มีแฟลชการ์ดสะสมจ้า")
 
-# ดึงประวัติเฉพาะของ User ปัจจุบันออกมากางเพื่อนับคะแนนโชว์ใน Sidebar
 user_history = [d for d in st.session_state.global_stats_log if d["user"] == current_user]
 user_correct_total = sum([d["is_correct"] for d in user_history])
 
@@ -196,9 +193,13 @@ else:
             st.info(f"Book: {q['book']} | Topic: {q['topic']} | Difficulty: {q['difficulty']}")
             st.write(q['question_text'])
             
-            opts = [f"A: {q['options'].get('A','')}", f"B: {q['options'].get('B','')}", f"C: {q['options'].get('C','')}", f"D: {q['options'].get('D','') bricks')}" if ' bricks' in q['options'].get('D','') else f"D: {q['options'].get('D','')}"]
-            # ล้างคำว่า bricks ที่อาจค้างอยู่ปลายสายข้อมูล
-            opts[3] = opts[3].replace(" bricks')", "")
+            # 🛠️ ปรับแก้ช้อยส์ D ให้สะอาด เที่ยงตรง ไม่มีอักษรส่วนเกินหลุดรอด
+            opts = [
+                f"A: {q['options'].get('A','')}", 
+                f"B: {q['options'].get('B','')}", 
+                f"C: {q['options'].get('C','')}", 
+                f"D: {q['options'].get('D','')}"
+            ]
             
             u_ans = st.radio("เลือกคำตอบที่แม่นยำที่สุดตามหลักบริหารความเสี่ยง:", opts, index=0, key=f"prac_{q['question_id']}")
             
@@ -352,7 +353,7 @@ else:
                 st.rerun()
 
     # =========================================================
-    # 📊 หน้าที่ 3: Performance & AI Insights (กู้คืนกราฟ Radar + Progress กราฟเส้น)
+    # 📊 หน้าที่ 3: Performance & AI Insights (Radar + Progress Chart)
     # =========================================================
     elif app_mode == "📊 Performance & AI Insights":
         st.header(f"📊 Performance Dashboard & AI Insights (ผู้ใช้งานปัจจุบัน: {current_user})")
@@ -362,7 +363,6 @@ else:
         else:
             df = pd.DataFrame(user_history).sort_values(by="timestamp").reset_index(drop=True)
             
-            # ตารางสรุปพื้นฐานรายวิชา
             summary_df = df.groupby('book')['is_correct'].agg(['count', 'sum']).reset_index()
             summary_df.columns = ['Book', 'Total Questions', 'Correct Answers']
             summary_df['Accuracy (%)'] = (summary_df['Correct Answers'] / summary_df['Total Questions'] * 100).round(1)
@@ -372,11 +372,10 @@ else:
             
             col_graph1, col_graph2 = st.columns(2)
             
-            # 🕸️ 1. กราฟเรดาร์ (Radar Chart) แยกตามหัวข้อวิชาหลักตามที่กำหนดเดิม
+            # 🕸️ 1. กราฟเรดาร์ (Radar Chart) แยกตามวิชาหลัก
             with col_graph1:
                 st.markdown("#### 🕸️ Radar Chart Analysis (แยกตามหัวข้อวิชาหลัก)")
                 
-                # ตรวจสอบและเติมโครงสร้างให้ครบ 4 เล่ม เพื่อให้แกนเรดาร์วาดรูปได้สมมาตรสวยงาม
                 all_4_books = ["Foundations of Risk Management", "Quantitative Analysis", "Financial Markets and Products", "Valuation and Risk Models"]
                 radar_data = []
                 for b in all_4_books:
@@ -384,7 +383,7 @@ else:
                     if not match.empty:
                         radar_data.append({"Book": b, "Accuracy (%)": match.iloc[0]['Accuracy (%)']})
                     else:
-                        radar_data.append({"Book": b, "Accuracy (%)": 0.0}) # ถ้าวิชายังไม่ได้ทำ ให้ขึ้นจุด 0 ไว้ก่อน
+                        radar_data.append({"Book": b, "Accuracy (%)": 0.0})
                 radar_df = pd.DataFrame(radar_data)
                 
                 fig_radar = px.line_polar(radar_df, r='Accuracy (%)', theta='Book', line_close=True,
@@ -394,11 +393,10 @@ else:
                 fig_radar.update_layout(paper_bgcolor='rgba(0,0,0,0)')
                 st.plotly_chart(fig_radar, use_container_width=True)
                 
-            # 📈 2. กราฟความคืบหน้าของการทำข้อสอบแต่ละครั้ง (Cumulative Progress Chart)
+            # 📈 2. กราฟความคืบหน้าของการทำข้อสอบแต่ละครั้ง (Progress Chart)
             with col_graph2:
                 st.markdown("#### 📈 Cumulative Progress Chart (ความคืบหน้าแต่ละครั้ง)")
                 
-                # คำนวณหาค่าเฉลยสะสมวิ่งไปเรื่อย ๆ (Running Expanding Mean) ของการกดตอบแต่ละครั้ง
                 df['Attempt Number'] = df.index + 1
                 df['Running Accuracy (%)'] = (df['is_correct'].expanding().mean() * 100).round(1)
                 
