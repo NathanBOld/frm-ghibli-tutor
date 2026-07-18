@@ -61,7 +61,6 @@ def push_flashcard_to_db(fc):
     try: bq_client.insert_rows_json("frm-ai-tutor.FRM_DATASET.flashcards", [{"user_name": fc["user"], "front": fc["front"], "back": fc["back"]}])
     except: pass
 
-# 🛠️ ระบบลบการ์ดใบที่ระบุออกจากฐานข้อมูล BigQuery
 def delete_flashcard_from_db(fc):
     try:
         query = """
@@ -147,7 +146,7 @@ if "mock_duration_minutes" not in st.session_state: st.session_state.mock_durati
 if "mock_completed" not in st.session_state: st.session_state.mock_completed = False
 
 # =========================================================
-# 🧭 6. แผงควบคุมด้านข้าง & ระบบซิงค์ข้อมูลผู้ใช้ (Sidebar)
+# 🧭 6. แผงควบคุมด้านข้าง & ระบบสร้างการ์ดด่วน (Sidebar)
 # =========================================================
 with st.sidebar:
     st.title("🌿 Ghibli Control")
@@ -181,13 +180,26 @@ with st.sidebar:
     else: st.caption("เริ่มทำโจทย์สะสมความแม่นยำเพื่อรับการประเมินโอกาสสอบผ่านจ้า...")
 
     st.markdown("---")
-    st.header("🗂️ Flashcards สะสมด่วน")
-    if st.session_state.my_flashcards:
-        for i, card in enumerate(st.session_state.my_flashcards):
-            if isinstance(card, dict): st.info(f"📋 **Card {i+1}**\n{card.get('front', '')}")
-            else: st.info(f"📋 **Card {i+1}**\n{card}")
-    else:
-        st.caption("ยังไม่มีแฟลชการ์ดสะสมจ้า")
+    # 🛠️ [FEATURE UPGRADE] กล่องสร้าง Flashcard ด่วนใน Sidebar
+    st.header("✨ สร้าง Flashcard ด่วน")
+    if "sb_front" not in st.session_state: st.session_state.sb_front = ""
+    if "sb_back" not in st.session_state: st.session_state.sb_back = ""
+    
+    sb_front = st.text_input("ด้านหน้า (คำศัพท์/สูตร):", key="sb_front")
+    sb_back = st.text_area("ด้านหลัง (คำแปล/คำอธิบาย):", height=68, key="sb_back")
+    
+    if st.button("💾 เซฟลงคลัง (Save)", use_container_width=True):
+        if sb_front.strip() and sb_back.strip():
+            new_card = {"user": current_user, "front": sb_front.strip(), "back": sb_back.strip()}
+            st.session_state.my_flashcards.append(new_card)
+            push_flashcard_to_db(new_card)
+            st.toast("บันทึกการ์ดลงฐานข้อมูลเรียบร้อยจ้า! 🌰")
+            # เคลียร์ช่องข้อความหลังกดเซฟ
+            st.session_state.sb_front = ""
+            st.session_state.sb_back = ""
+            st.rerun()
+        else:
+            st.error("กรุณากรอกให้ครบทั้งหน้าและหลังจ้า")
 
 if not global_pool:
     st.warning("⚠️ ไม่พบข้อมูลโจทย์ในคลังข้อสอบคลาวด์ BigQuery กรุณาตรวจสอบการรันไฟล์ pipeline.py จ้า!")
@@ -252,17 +264,7 @@ else:
                 for item in q['key_vocabulary']: st.markdown(f"🔹 **{item.get('word','')}** : {item.get('translation','')}")
             else: st.caption("ข้อนี้ไม่มีศัพท์เทคนิคยากเพิ่มเติมจ้า")
                 
-            st.markdown('<div class="tool-card"><div class="tool-title">📝 บันทึกเข้า Flashcard Studio</div></div>', unsafe_allow_html=True)
-            cf1, cf2 = st.columns(2)
-            with cf1: f_front = st.text_input("ด้านหน้า (คำศัพท์/สูตร):", key="f_front")
-            with cf2: f_back = st.text_area("ด้านหลัง (คำแปล/คำอธิบาย):", height=68, key="f_back")
-            if st.button("💾 เซฟแฟลชการ์ด (Save Card)"):
-                if f_front.strip() and f_back.strip():
-                    new_card = {"user": current_user, "front": f_front.strip(), "back": f_back.strip()}
-                    st.session_state.my_flashcards.append(new_card)
-                    push_flashcard_to_db(new_card)
-                    st.toast("บันทึกการ์ดใบใหม่ส่งตรงเข้าห้อง Flashcard Studio เรียบร้อยจ้า! 🌰")
-                    st.rerun()
+            # 🛠️ นำกล่องบันทึก Flashcard เดิมออกไป เพื่อให้พื้นที่สะอาดตา (ใช้ของ Sidebar แทน)
                     
             st.markdown('<div class="tool-card"><div class="tool-title">🧙‍♂️ ช่องแชทติวเตอร์เวทมนตร์ (AI Tutor)</div></div>', unsafe_allow_html=True)
             for m in st.session_state.practice_chat:
@@ -427,29 +429,18 @@ else:
                     except: st.error("ระบบ AI ขัดข้องชั่วคราวจ้า")
 
     # =========================================================
-    # 🗂️ หน้าที่ 4: Flashcard Studio (ลบการ์ดได้)
+    # 🗂️ หน้าที่ 4: Flashcard Studio 
     # =========================================================
     elif app_mode == "🗂️ Flashcard Studio":
         st.header(f"🗂️ Flashcard Studio ({current_user})")
+        st.caption("พื้นที่สำหรับทบทวนและบริหารจัดการคลังความจำเฉพาะตัว ✍️")
         
-        st.markdown('<div class="tool-card"><div class="tool-title">✨ สร้าง Flashcard ใบใหม่เข้าฐานข้อมูล</div>', unsafe_allow_html=True)
-        col1, col2 = st.columns(2)
-        with col1: front_text = st.text_input("ด้านหน้า (คำศัพท์/สูตร):")
-        with col2: back_text = st.text_area("ด้านหลัง (คำแปล):", height=68)
-        if st.button("➕ เพิ่มลงคลังความจำ"):
-            if front_text.strip() and back_text.strip():
-                new_card = {"user": current_user, "front": front_text.strip(), "back": back_text.strip()}
-                st.session_state.my_flashcards.append(new_card)
-                push_flashcard_to_db(new_card) 
-                st.success("บันทึกการ์ดลงฐานข้อมูลคลาวด์สำเร็จจ้า!")
-                st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
-
+        # 🛠️ นำกล่องสร้างของหน้านี้ออกไปด้วยเพื่อหลีกเลี่ยงความซ้ำซ้อน เพราะย้ายไปรวมที่ Sidebar หมดแล้ว
         st.markdown("---")
         st.subheader("📚 แผง Flashcard ของคุณ")
         user_cards = [c for c in st.session_state.my_flashcards if isinstance(c, dict) and c.get("user") == current_user]
         
-        if not user_cards: st.info("ยังไม่มีการ์ดในคลังจ้า ลองพิมพ์สร้างใบแรกดูสิ!")
+        if not user_cards: st.info("ยังไม่มีการ์ดในคลังจ้า ลองพิมพ์คำศัพท์หรือสูตรสร้างใบแรกที่แถบเครื่องมือด้านซ้ายมือดูสิ!")
         else:
             for i in range(0, len(user_cards), 3):
                 cols = st.columns(3)
@@ -457,7 +448,6 @@ else:
                     with cols[j]:
                         st.markdown(f'<div class="fc-card"><div class="fc-front">{c.get("front","")}</div><hr class="fc-divider"><div class="fc-back">{c.get("back","")}</div></div>', unsafe_allow_html=True)
                         
-                        # 🛠️ ปุ่มสั่งลบการ์ดพร้อมสั่งล้างฐานข้อมูล
                         st.markdown('<div class="btn-delete">', unsafe_allow_html=True)
                         if st.button("🗑️ ลบการ์ดใบนี้", key=f"del_{i}_{j}_{c.get('front','')[:5]}"):
                             delete_flashcard_from_db(c)
