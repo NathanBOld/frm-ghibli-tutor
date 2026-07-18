@@ -389,7 +389,7 @@ else:
                 fig_radar = px.line_polar(radar_df, r='Accuracy (%)', theta='Book', line_close=True,
                                           title="อัตราความแม่นยำรายวิชา (%)",
                                           color_discrete_sequence=['#8F9E8B'])
-                fig_radar.update_traces(fill='adjacent')
+                fig_radar.update_traces(fill='toself')
                 fig_radar.update_layout(paper_bgcolor='rgba(0,0,0,0)')
                 st.plotly_chart(fig_radar, use_container_width=True)
                 
