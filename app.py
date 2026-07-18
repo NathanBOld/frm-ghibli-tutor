@@ -90,7 +90,7 @@ def fetch_user_data(username):
     return stats, mocks, cards
 
 # =========================================================
-# 🎨 3. ตั้งค่าธีมโฮมสเตย์กิบลิอบอุ่น (CSS)
+# 🎨 3. ตั้งค่าธีมโฮมสเตย์กิบลิอบอุ่น (CSS) + กรอบสีทอง
 # =========================================================
 st.set_page_config(page_title="FRM Ghibli Central", page_icon="🌿", layout="wide")
 
@@ -109,6 +109,32 @@ st.markdown("""
     .fc-front { color: #8F9E8B; font-weight: 600; font-size: 1.15rem; }
     .fc-divider { border-top: 1.5px dashed #D9C5B2; margin: 12px 0; }
     .fc-back { color: #4A3E3D; font-size: 0.95rem; }
+    
+    /* 🏆 CSS สำหรับกรอบทองคำและแอนิเมชัน 3D */
+    .gold-frame-container { text-align: center; margin-top: 15px; margin-bottom: 20px; }
+    .gold-frame {
+        display: inline-block;
+        padding: 6px;
+        background: linear-gradient(135deg, #FFDF00 0%, #DAA520 50%, #B8860B 100%);
+        border-radius: 16px;
+        box-shadow: 0 6px 12px rgba(218, 165, 32, 0.3);
+        margin-bottom: 12px;
+    }
+    .gold-frame img {
+        width: 150px;
+        height: 150px;
+        object-fit: cover;
+        border-radius: 10px;
+        border: 2px solid #FFF8DC;
+        display: block;
+        background-color: white;
+    }
+    .badge-text-outside {
+        color: #4A3E3D;
+        font-size: 0.95rem;
+        line-height: 1.4;
+    }
+    .badge-title { font-weight: 600; font-size: 1.1rem; color: #DAA520; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -146,13 +172,12 @@ if "mock_duration_minutes" not in st.session_state: st.session_state.mock_durati
 if "mock_completed" not in st.session_state: st.session_state.mock_completed = False
 
 # =========================================================
-# 🧭 6. แผงควบคุมด้านข้าง Ghibli Control (อัปเกรดเป็น Gamification)
+# 🧭 6. แผงควบคุมด้านข้าง (Ghibli Gamification Control)
 # =========================================================
 with st.sidebar:
     st.title("🌿 Ghibli Control")
     current_user = st.text_input("👤 ชื่อผู้ใช้งาน (User Name):", value="Nathan").strip()
 
-# 🚀 โหลดข้อมูลจากฐานข้อมูล
 if "db_loaded_for" not in st.session_state or st.session_state.db_loaded_for != current_user:
     with st.spinner(f"☁️ กำลังซิงค์แฟ้มประวัติของ {current_user} จาก BigQuery..."):
         s_stats, s_mocks, s_cards = fetch_user_data(current_user)
@@ -161,24 +186,43 @@ if "db_loaded_for" not in st.session_state or st.session_state.db_loaded_for != 
         st.session_state.my_flashcards = s_cards
         st.session_state.db_loaded_for = current_user
 
-# 🧮 คำนวณคะแนนสำหรับแจกเหรียญรางวัล
+# 🧮 คำนวณเลเวลเพื่อปลดล็อกตราประทับ
 user_history = [d for d in st.session_state.global_stats_log if d["user"] == current_user]
 total_q = len(user_history)
 correct_q = sum([d["is_correct"] for d in user_history])
 overall_acc = (correct_q / total_q * 100) if total_q > 0 else 0
 
 with st.sidebar:
-    # 🏅 โซนตราประทับเกียรติยศ (ย้ายขึ้นมารวมกับ Ghibli Control ไร้ตัวเลข %)
-    st.markdown("---")
-    st.subheader("🏅 ตราประทับเกียรติยศ")
+    # 🏅 โซนตราประทับเกียรติยศ (3D Animated in Gold Frame) ไร้ตัวเลขเป๊ะๆ แบบเกม RPG
     if overall_acc >= 70 and total_q >= 20: 
-        st.markdown("🦦 **ราชาคาปิบาร่าออนเซ็น**\n(ระดับปรมาจารย์! พร้อมลุยสนามจริง)")
+        gif_url = "https://media1.tenor.com/m/8QzX37xS8UIAAAAC/capybara-onsen.gif"
+        title = "🦦 ราชาคาปิบาร่าออนเซ็น"
+        desc = "ระดับปรมาจารย์! พร้อมลุยสนามจริง"
     elif overall_acc >= 50 and total_q >= 10: 
-        st.markdown("🔥 **เปลวไฟ Calcifer**\n(ระดับกลาง! ลุยทบทวนจุดอ่อนอีกนิด)")
+        gif_url = "https://media.giphy.com/media/4ZrruD2A0pUuA/giphy.gif"
+        title = "🔥 เปลวไฟ Calcifer"
+        desc = "ระดับกลาง! ลุยทบทวนจุดอ่อนอีกนิด"
     elif total_q > 0: 
-        st.markdown("🌰 **เมล็ดโอ๊ค Totoro**\n(นักวิเคราะห์ฝึกหัด! เก็บเกี่ยวประสบการณ์ต่อไปนะ)")
+        gif_url = "https://media.giphy.com/media/J1aivEv1pEUlS9A1QO/giphy.gif"
+        title = "🌰 เมล็ดโอ๊ค Totoro"
+        desc = "นักวิเคราะห์ฝึกหัด! สะสมประสบการณ์ต่อไป"
     else: 
-        st.caption("ยังไม่มีตราประทับ เริ่มทำโจทย์เพื่อปลดล็อกจ้า...")
+        gif_url = None
+
+    if gif_url:
+        st.markdown(f'''
+            <div class="gold-frame-container">
+                <div class="gold-frame">
+                    <img src="{gif_url}">
+                </div>
+                <div class="badge-text-outside">
+                    <div class="badge-title">{title}</div>
+                    {desc}
+                </div>
+            </div>
+        ''', unsafe_allow_html=True)
+    else:
+        st.caption("🎮 เริ่มต้นทำโจทย์ข้อแรกเพื่อปลดล็อกถ้วยรางวัลแอนิเมชันจ้า...")
 
     st.markdown("---")
     app_mode = st.radio("เลือกพื้นที่ทำงาน (Menu):", ["📝 Practice Mode", "⏱️ Mock Exam Simulator", "📊 Performance & AI Insights", "🗂️ Flashcard Studio"])
