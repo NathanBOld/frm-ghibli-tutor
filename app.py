@@ -160,7 +160,8 @@ else:
         f"D: {q['options'].get('D', '')}"
     ]
     
-    selected_radio = st.radio("เลือกคำตอบที่ถูกต้องที่สุดตามหลักปฏิบัติการเงิน:", options_list, index=None, placeholder="กรุณาเลือกช้อยส์คำตอบที่นี่...")
+    # 🛠️ แก้ไขบรรทัดนี้: ลบ index=None และ placeholder ออก เปลี่ยนมาล็อกเริ่มต้นที่ตัวเลือกแรกสุด (index=0) เพื่อสยบบั๊ก Python 3.14
+    selected_radio = st.radio("เลือกคำตอบที่ถูกต้องที่สุดตามหลักปฏิบัติการเงิน:", options_list, index=0)
     
     col_btn1, col_btn2 = st.columns(2)
     with col_btn1:
