@@ -26,59 +26,86 @@ else:
 ai_client = genai.Client(api_key=GEMINI_API_KEY)
 
 # =========================================================
-# 🎨 2. ตั้งค่าธีมโฮมสเตย์กิบลิอบอุ่น (CSS เจาะระบบล็อก)
+# 🗄️ 2. ระบบ Auto-Sync ฐานข้อมูล (สร้างตาราง & ดึง/ส่ง/ลบข้อมูล)
+# =========================================================
+@st.cache_resource(show_spinner=False)
+def ensure_db_tables_exist():
+    dataset_ref = bq_client.dataset("FRM_DATASET", project="frm-ai-tutor")
+    schema_stats = [
+        bigquery.SchemaField("user_name", "STRING"), bigquery.SchemaField("book", "STRING"),
+        bigquery.SchemaField("topic", "STRING"), bigquery.SchemaField("is_correct", "INTEGER"),
+        bigquery.SchemaField("recorded_id", "STRING"), bigquery.SchemaField("timestamp", "FLOAT"),
+    ]
+    bq_client.create_table(bigquery.Table(dataset_ref.table("user_stats"), schema=schema_stats), exists_ok=True)
+    schema_fc = [
+        bigquery.SchemaField("user_name", "STRING"), bigquery.SchemaField("front", "STRING"), bigquery.SchemaField("back", "STRING"),
+    ]
+    bq_client.create_table(bigquery.Table(dataset_ref.table("flashcards"), schema=schema_fc), exists_ok=True)
+    schema_mock = [
+        bigquery.SchemaField("user_name", "STRING"), bigquery.SchemaField("score", "FLOAT"), bigquery.SchemaField("timestamp", "FLOAT"),
+    ]
+    bq_client.create_table(bigquery.Table(dataset_ref.table("mock_scores"), schema=schema_mock), exists_ok=True)
+
+try: ensure_db_tables_exist()
+except: pass
+
+def push_stat_to_db(stat):
+    try: bq_client.insert_rows_json("frm-ai-tutor.FRM_DATASET.user_stats", [{"user_name": stat["user"], "book": stat["book"], "topic": stat["topic"], "is_correct": stat["is_correct"], "recorded_id": stat["recorded_id"], "timestamp": stat["timestamp"]}])
+    except: pass
+
+def push_mock_to_db(mock_log):
+    try: bq_client.insert_rows_json("frm-ai-tutor.FRM_DATASET.mock_scores", [{"user_name": mock_log["user"], "score": mock_log["score"], "timestamp": mock_log["timestamp"]}])
+    except: pass
+
+def push_flashcard_to_db(fc):
+    try: bq_client.insert_rows_json("frm-ai-tutor.FRM_DATASET.flashcards", [{"user_name": fc["user"], "front": fc["front"], "back": fc["back"]}])
+    except: pass
+
+# 🛠️ ระบบลบการ์ดใบที่ระบุออกจากฐานข้อมูล BigQuery
+def delete_flashcard_from_db(fc):
+    try:
+        query = """
+            DELETE FROM `frm-ai-tutor.FRM_DATASET.flashcards`
+            WHERE user_name = @user_name AND front = @front AND back = @back
+        """
+        job_config = bigquery.QueryJobConfig(
+            query_parameters=[
+                bigquery.ScalarQueryParameter("user_name", "STRING", fc.get("user")),
+                bigquery.ScalarQueryParameter("front", "STRING", fc.get("front")),
+                bigquery.ScalarQueryParameter("back", "STRING", fc.get("back")),
+            ]
+        )
+        bq_client.query(query, job_config=job_config).result()
+    except: pass
+
+def fetch_user_data(username):
+    stats, mocks, cards = [], [], []
+    try:
+        s_rows = bq_client.query(f"SELECT * FROM `frm-ai-tutor.FRM_DATASET.user_stats` WHERE user_name = '{username}'").result()
+        stats = [{"user": r.user_name, "book": r.book, "topic": r.topic, "is_correct": r.is_correct, "recorded_id": r.recorded_id, "timestamp": r.timestamp} for r in s_rows]
+        m_rows = bq_client.query(f"SELECT * FROM `frm-ai-tutor.FRM_DATASET.mock_scores` WHERE user_name = '{username}'").result()
+        mocks = [{"user": r.user_name, "score": r.score, "timestamp": r.timestamp} for r in m_rows]
+        c_rows = bq_client.query(f"SELECT * FROM `frm-ai-tutor.FRM_DATASET.flashcards` WHERE user_name = '{username}'").result()
+        cards = [{"user": r.user_name, "front": r.front, "back": r.back} for r in c_rows]
+    except: pass
+    return stats, mocks, cards
+
+# =========================================================
+# 🎨 3. ตั้งค่าธีมโฮมสเตย์กิบลิอบอุ่น (CSS)
 # =========================================================
 st.set_page_config(page_title="FRM Ghibli Central", page_icon="🌿", layout="wide")
 
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;600&display=swap');
-    [data-testid="stAppViewContainer"], [data-testid="stSidebar"], .stApp {
-        background-color: #FFFDF9 !important;
-        color: #4A3E3D !important;
-        font-family: 'Sarabun', sans-serif;
-    }
-    .stButton>button {
-        background-color: #8F9E8B !important; 
-        color: white !important;
-        border-radius: 12px !important;
-        border: none !important;
-        padding: 8px 20px !important;
-        transition: all 0.3s;
-    }
-    .stButton>button:hover {
-        background-color: #72826E !important;
-        transform: translateY(-2px);
-    }
-    .tool-card {
-        background-color: #F4EFEA !important;
-        padding: 18px;
-        border-radius: 14px;
-        border-left: 6px solid #8F9E8B;
-        margin-bottom: 20px;
-    }
-    .exam-timer {
-        font-size: 1.6rem;
-        font-weight: 600;
-        color: #C87A7A;
-        background-color: #FCEAEA;
-        padding: 12px;
-        border-radius: 10px;
-        text-align: center;
-        margin-bottom: 15px;
-    }
-    /* 🛠️ CSS สำหรับ Flashcard หน้า-หลังรูปแบบใหม่ */
-    .fc-card {
-        background-color: #FFFDF9;
-        border: 2px solid #D9C5B2;
-        border-radius: 12px;
-        padding: 20px;
-        margin-bottom: 15px;
-        text-align: center;
-        box-shadow: 2px 4px 8px rgba(0,0,0,0.04);
-        height: 100%;
-        transition: transform 0.2s;
-    }
+    [data-testid="stAppViewContainer"], [data-testid="stSidebar"], .stApp { background-color: #FFFDF9 !important; color: #4A3E3D !important; font-family: 'Sarabun', sans-serif; }
+    .stButton>button { background-color: #8F9E8B !important; color: white !important; border-radius: 12px !important; border: none !important; padding: 8px 20px !important; transition: all 0.3s; }
+    .stButton>button:hover { background-color: #72826E !important; transform: translateY(-2px); }
+    .btn-delete>button { background-color: #C87A7A !important; font-size: 0.85rem !important; padding: 4px 10px !important; margin-top: 5px; }
+    .btn-delete>button:hover { background-color: #B56565 !important; }
+    .tool-card { background-color: #F4EFEA !important; padding: 18px; border-radius: 14px; border-left: 6px solid #8F9E8B; margin-bottom: 20px; }
+    .exam-timer { font-size: 1.6rem; font-weight: 600; color: #C87A7A; background-color: #FCEAEA; padding: 12px; border-radius: 10px; text-align: center; margin-bottom: 15px; }
+    .fc-card { background-color: #FFFDF9; border: 2px solid #D9C5B2; border-radius: 12px; padding: 20px; text-align: center; box-shadow: 2px 4px 8px rgba(0,0,0,0.04); height: 100%; transition: transform 0.2s; }
     .fc-card:hover { transform: scale(1.02); }
     .fc-front { color: #8F9E8B; font-weight: 600; font-size: 1.15rem; }
     .fc-divider { border-top: 1.5px dashed #D9C5B2; margin: 12px 0; }
@@ -87,81 +114,57 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # =========================================================
-# 📊 3. ฟังก์ชันดึงคลังข้อสอบทั้งหมดจาก BigQuery Cloud
+# 📊 4. ฟังก์ชันดึงคลังข้อสอบจาก BigQuery Cloud
 # =========================================================
 @st.cache_data(show_spinner=False)
 def load_global_questions():
-    table_id = "frm-ai-tutor.FRM_DATASET.questions"
-    query = f"SELECT * FROM `{table_id}`"
     try:
-        query_job = bq_client.query(query)
-        rows = query_job.result()
+        rows = bq_client.query("SELECT * FROM `frm-ai-tutor.FRM_DATASET.questions`").result()
         pool = []
         for row in rows:
-            options_dict = json.loads(row.options) if isinstance(row.options, str) else row.options
-            vocab_list = json.loads(row.key_vocabulary) if isinstance(row.key_vocabulary, str) else row.key_vocabulary
             pool.append({
-                "question_id": row.question_id,
-                "book": row.book,
-                "topic": row.topic,
-                "difficulty": row.difficulty,
-                "question_text": row.question_text,
-                "options": options_dict,
-                "correct_option": row.correct_option,
-                "explanation_en": row.explanation_en,
-                "explanation_th": row.explanation_th,
-                "key_vocabulary": vocab_list
+                "question_id": row.question_id, "book": row.book, "topic": row.topic, "difficulty": row.difficulty,
+                "question_text": row.question_text, "correct_option": row.correct_option,
+                "explanation_en": row.explanation_en, "explanation_th": row.explanation_th,
+                "options": json.loads(row.options) if isinstance(row.options, str) else row.options,
+                "key_vocabulary": json.loads(row.key_vocabulary) if isinstance(row.key_vocabulary, str) else row.key_vocabulary
             })
         return pool
-    except Exception:
-        return []
+    except: return []
 
 global_pool = load_global_questions()
 
 # =========================================================
-# ⚙️ 4. บริหารกลไกตัวแปรระบบหลัก (Session State)
+# ⚙️ 5. บริหารกลไกตัวแปรระบบหลัก (Session State)
 # =========================================================
-if "my_flashcards" not in st.session_state:
-    st.session_state.my_flashcards = []
-if "practice_idx" not in st.session_state:
-    st.session_state.practice_idx = 0
-if "practice_submitted" not in st.session_state:
-    st.session_state.practice_submitted = False
-if "practice_chat" not in st.session_state:
-    st.session_state.practice_chat = []
-if "global_stats_log" not in st.session_state:
-    st.session_state.global_stats_log = []
-
-# ตัวแปรสำหรับโหมดจำลองสอบ (Mock Exam)
-if "mock_questions" not in st.session_state:
-    st.session_state.mock_questions = []
-if "mock_user_answers" not in st.session_state:
-    st.session_state.mock_user_answers = {}
-if "mock_start_time" not in st.session_state:
-    st.session_state.mock_start_time = None
-if "mock_duration_minutes" not in st.session_state:
-    st.session_state.mock_duration_minutes = 60
-if "mock_completed" not in st.session_state:
-    st.session_state.mock_completed = False
-if "mock_scores" not in st.session_state:
-    st.session_state.mock_scores = [] # เก็บประวัติเป้าหมาย % รวมของการสอบ Mock แต่ละครั้ง
+if "practice_idx" not in st.session_state: st.session_state.practice_idx = 0
+if "practice_submitted" not in st.session_state: st.session_state.practice_submitted = False
+if "practice_chat" not in st.session_state: st.session_state.practice_chat = []
+if "mock_questions" not in st.session_state: st.session_state.mock_questions = []
+if "mock_user_answers" not in st.session_state: st.session_state.mock_user_answers = {}
+if "mock_start_time" not in st.session_state: st.session_state.mock_start_time = None
+if "mock_duration_minutes" not in st.session_state: st.session_state.mock_duration_minutes = 60
+if "mock_completed" not in st.session_state: st.session_state.mock_completed = False
 
 # =========================================================
-# 🧭 5. แผงควบคุมด้านข้าง & ระบบประเมินรางวัลความสำเร็จ (Sidebar)
+# 🧭 6. แผงควบคุมด้านข้าง & ระบบซิงค์ข้อมูลผู้ใช้ (Sidebar)
 # =========================================================
 with st.sidebar:
     st.title("🌿 Ghibli Control")
     current_user = st.text_input("👤 ชื่อผู้ใช้งาน (User Name):", value="Nathan").strip()
-    
-    st.markdown("---")
-    app_mode = st.radio("เลือกพื้นที่ทำงาน (Menu):", [
-        "📝 Practice Mode", 
-        "⏱️ Mock Exam Simulator", 
-        "📊 Performance & AI Insights",
-        "🗂️ Flashcard Studio"
-    ])
 
-# ดึงประวัติคำนวณโอกาสสอบผ่าน (Reward System)
+if "db_loaded_for" not in st.session_state or st.session_state.db_loaded_for != current_user:
+    with st.spinner(f"☁️ กำลังซิงค์แฟ้มประวัติของ {current_user} จาก BigQuery..."):
+        s_stats, s_mocks, s_cards = fetch_user_data(current_user)
+        st.session_state.global_stats_log = s_stats
+        st.session_state.mock_scores = s_mocks
+        st.session_state.my_flashcards = s_cards
+        st.session_state.db_loaded_for = current_user
+
+with st.sidebar:
+    st.markdown("---")
+    app_mode = st.radio("เลือกพื้นที่ทำงาน (Menu):", ["📝 Practice Mode", "⏱️ Mock Exam Simulator", "📊 Performance & AI Insights", "🗂️ Flashcard Studio"])
+
 user_history = [d for d in st.session_state.global_stats_log if d["user"] == current_user]
 total_q = len(user_history)
 correct_q = sum([d["is_correct"] for d in user_history])
@@ -171,26 +174,18 @@ with st.sidebar:
     st.markdown("---")
     st.metric(f"ความแม่นยำรวมของ {current_user}", f"{overall_acc:.1f}%", delta=f"ทำไปแล้ว {total_q} ข้อ")
     
-    # 🏅 คืนชีพระบบให้รางวัล 3D ประเมินโอกาสสอบผ่าน
     st.subheader("🏅 ตราประทับโอกาสสอบผ่าน")
-    if overall_acc >= 70 and total_q >= 20:
-        st.markdown("🦦 **ราชาคาปิบาร่าออนเซ็น**\n(โอกาสสอบผ่านสูงมาก! พร้อมลุยสนามจริง)")
-    elif overall_acc >= 50 and total_q >= 10:
-        st.markdown("🔥 **เปลวไฟ Calcifer**\n(โอกาสผ่าน 50/50 ลุยทบทวนจุดอ่อนอีกนิด!)")
-    elif total_q > 0:
-        st.markdown("🌰 **เมล็ดโอ๊ค Totoro**\n(เพิ่งเริ่มออกเดินทาง เก็บเกี่ยวประสบการณ์ต่อไปนะ!)")
-    else:
-        st.caption("เริ่มทำโจทย์สะสมความแม่นยำเพื่อรับการประเมินโอกาสสอบผ่านจ้า...")
+    if overall_acc >= 70 and total_q >= 20: st.markdown("🦦 **ราชาคาปิบาร่าออนเซ็น**\n(โอกาสสอบผ่านสูงมาก! พร้อมลุยสนามจริง)")
+    elif overall_acc >= 50 and total_q >= 10: st.markdown("🔥 **เปลวไฟ Calcifer**\n(โอกาสผ่าน 50/50 ลุยทบทวนจุดอ่อนอีกนิด!)")
+    elif total_q > 0: st.markdown("🌰 **เมล็ดโอ๊ค Totoro**\n(เพิ่งเริ่มออกเดินทาง เก็บเกี่ยวประสบการณ์ต่อไปนะ!)")
+    else: st.caption("เริ่มทำโจทย์สะสมความแม่นยำเพื่อรับการประเมินโอกาสสอบผ่านจ้า...")
 
     st.markdown("---")
     st.header("🗂️ Flashcards สะสมด่วน")
     if st.session_state.my_flashcards:
         for i, card in enumerate(st.session_state.my_flashcards):
-            # 🛠️ [BUG FIX] แยกการโชว์ผลระหว่างการ์ดแบบเก่า (ข้อความ) และการ์ดแบบใหม่ (ดึงเฉพาะด้านหน้ามาโชว์)
-            if isinstance(card, dict):
-                st.info(f"📋 **Card {i+1}**\n{card.get('front', '')}")
-            else:
-                st.info(f"📋 **Card {i+1}**\n{card}")
+            if isinstance(card, dict): st.info(f"📋 **Card {i+1}**\n{card.get('front', '')}")
+            else: st.info(f"📋 **Card {i+1}**\n{card}")
     else:
         st.caption("ยังไม่มีแฟลชการ์ดสะสมจ้า")
 
@@ -198,7 +193,7 @@ if not global_pool:
     st.warning("⚠️ ไม่พบข้อมูลโจทย์ในคลังข้อสอบคลาวด์ BigQuery กรุณาตรวจสอบการรันไฟล์ pipeline.py จ้า!")
 else:
     # =========================================================
-    # 🗂️ หน้าที่ 1: Practice Mode (ฝึกฝนแยกหัวข้อ)
+    # 🗂️ หน้าที่ 1: Practice Mode 
     # =========================================================
     if app_mode == "📝 Practice Mode":
         st.header(f"📝 Practice Mode (ผู้ใช้งานปัจจุบัน: {current_user})")
@@ -206,24 +201,14 @@ else:
         books_available = sorted(list(set([q['book'] for q in global_pool])))
         selected_book = st.selectbox("1. เลือกเล่มหลักสูตร FRM Book:", ["Show All"] + books_available)
         
-        if selected_book != "Show All":
-            topics_available = sorted(list(set([q['topic'] for q in global_pool if q['book'] == selected_book])))
-        else:
-            topics_available = sorted(list(set([q['topic'] for q in global_pool])))
+        topics_available = sorted(list(set([q['topic'] for q in global_pool if q['book'] == selected_book]))) if selected_book != "Show All" else sorted(list(set([q['topic'] for q in global_pool])))
         selected_topic = st.selectbox("2. เลือกหัวข้อเฉพาะทาง Topic:", ["Show All"] + topics_available)
         
-        filtered_pool = global_pool
-        if selected_book != "Show All":
-            filtered_pool = [q for q in filtered_pool if q['book'] == selected_book]
-        if selected_topic != "Show All":
-            filtered_pool = [q for q in filtered_pool if q['topic'] == selected_topic]
+        filtered_pool = [q for q in global_pool if (selected_book == "Show All" or q['book'] == selected_book) and (selected_topic == "Show All" or q['topic'] == selected_topic)]
             
-        if not filtered_pool:
-            st.info("🍃 หัวข้อที่คุณเลือกยังไม่มีข้อสอบบรรจุอยู่ ลองเลือกหัวข้ออื่นดูนะจ้า")
+        if not filtered_pool: st.info("🍃 หัวข้อที่คุณเลือกยังไม่มีข้อสอบบรรจุอยู่ ลองเลือกหัวข้ออื่นดูนะจ้า")
         else:
-            if st.session_state.practice_idx >= len(filtered_pool):
-                st.session_state.practice_idx = 0
-                
+            if st.session_state.practice_idx >= len(filtered_pool): st.session_state.practice_idx = 0
             q = filtered_pool[st.session_state.practice_idx]
             
             st.markdown(f"**📌 Question {st.session_state.practice_idx + 1} / {len(filtered_pool)}**")
@@ -235,8 +220,7 @@ else:
             
             c1, c2 = st.columns(2)
             with c1:
-                if st.button("🚀 ส่งคำตอบตรวจทาน (Submit)", use_container_width=True):
-                    st.session_state.practice_submitted = True
+                if st.button("🚀 ส่งคำตอบตรวจทาน (Submit)", use_container_width=True): st.session_state.practice_submitted = True
             with c2:
                 if st.button("⏭️ สลับข้อถัดไป (Next Random)", use_container_width=True):
                     st.session_state.practice_idx = random.randint(0, len(filtered_pool) - 1)
@@ -247,14 +231,15 @@ else:
             if st.session_state.practice_submitted:
                 st.markdown("---")
                 final_choice = u_ans[0]
-                if final_choice == q['correct_option']:
-                    st.success(f"✨ ยอดเยี่ยมมากครับเฉลยถูกต้องคือข้อ {q['correct_option']}!")
-                    if not any(d.get('recorded_id') == q['question_id'] and d["user"] == current_user for d in st.session_state.global_stats_log):
-                        st.session_state.global_stats_log.append({"user": current_user, "book": q['book'], "topic": q['topic'], "is_correct": 1, "recorded_id": q['question_id'], "timestamp": time.time()})
-                else:
-                    st.error(f"ผิดพลาดเล็กน้อยจ้า เฉลยที่แท้จริงคือข้อ {q['correct_option']}")
-                    if not any(d.get('recorded_id') == q['question_id'] and d["user"] == current_user for d in st.session_state.global_stats_log):
-                        st.session_state.global_stats_log.append({"user": current_user, "book": q['book'], "topic": q['topic'], "is_correct": 0, "recorded_id": q['question_id'], "timestamp": time.time()})
+                is_correct = 1 if final_choice == q['correct_option'] else 0
+                
+                if is_correct: st.success(f"✨ ยอดเยี่ยมมากครับเฉลยถูกต้องคือข้อ {q['correct_option']}!")
+                else: st.error(f"ผิดพลาดเล็กน้อยจ้า เฉลยที่แท้จริงคือข้อ {q['correct_option']}")
+                
+                if not any(d.get('recorded_id') == q['question_id'] and d["user"] == current_user for d in st.session_state.global_stats_log):
+                    new_stat = {"user": current_user, "book": q['book'], "topic": q['topic'], "is_correct": is_correct, "recorded_id": q['question_id'], "timestamp": time.time()}
+                    st.session_state.global_stats_log.append(new_stat)
+                    push_stat_to_db(new_stat)
                         
                 st.markdown(f"**📖 Detailed Explanation (EN):**\n{q['explanation_en']}")
                 st.markdown(f"**🇹🇭 คำอธิบายและเฉลยละเอียดภาษาไทย:**\n{q['explanation_th']}")
@@ -264,20 +249,18 @@ else:
             
             st.markdown('<div class="tool-card"><div class="tool-title">📚 ศัพท์เฉพาะประจำข้อ (Key Vocabulary)</div></div>', unsafe_allow_html=True)
             if q['key_vocabulary']:
-                for item in q['key_vocabulary']:
-                    st.markdown(f"🔹 **{item.get('word','')}** : {item.get('translation','')}")
-            else:
-                st.caption("ข้อนี้ไม่มีศัพท์เทคนิคยากเพิ่มเติมจ้า")
+                for item in q['key_vocabulary']: st.markdown(f"🔹 **{item.get('word','')}** : {item.get('translation','')}")
+            else: st.caption("ข้อนี้ไม่มีศัพท์เทคนิคยากเพิ่มเติมจ้า")
                 
             st.markdown('<div class="tool-card"><div class="tool-title">📝 บันทึกเข้า Flashcard Studio</div></div>', unsafe_allow_html=True)
             cf1, cf2 = st.columns(2)
-            with cf1:
-                f_front = st.text_input("ด้านหน้า (คำศัพท์/สูตร):", key="f_front")
-            with cf2:
-                f_back = st.text_area("ด้านหลัง (คำแปล/คำอธิบาย):", height=68, key="f_back")
+            with cf1: f_front = st.text_input("ด้านหน้า (คำศัพท์/สูตร):", key="f_front")
+            with cf2: f_back = st.text_area("ด้านหลัง (คำแปล/คำอธิบาย):", height=68, key="f_back")
             if st.button("💾 เซฟแฟลชการ์ด (Save Card)"):
                 if f_front.strip() and f_back.strip():
-                    st.session_state.my_flashcards.append({"user": current_user, "front": f_front.strip(), "back": f_back.strip()})
+                    new_card = {"user": current_user, "front": f_front.strip(), "back": f_back.strip()}
+                    st.session_state.my_flashcards.append(new_card)
+                    push_flashcard_to_db(new_card)
                     st.toast("บันทึกการ์ดใบใหม่ส่งตรงเข้าห้อง Flashcard Studio เรียบร้อยจ้า! 🌰")
                     st.rerun()
                     
@@ -287,45 +270,41 @@ else:
             c_input = st.chat_input("💬 สอบถามข้อสงสัยเกี่ยวกับสูตรคำนวณหรือตรรกะข้อนี้...")
             if c_input:
                 st.session_state.practice_chat.append({"role": "user", "text": c_input})
-                ctx = f"You are a warm FRM tutor. Question: {q['question_text']}. User asks: {c_input}. Answer warmly and concisely using 'ครับจ้า'"
                 with st.spinner("AI กำลังเรียบเรียงคำตอบ..."):
-                    res = ai_client.models.generate_content(model='gemini-3.1-flash-lite', contents=ctx)
-                    st.session_state.practice_chat.append({"role": "model", "text": res.text})
+                    try:
+                        res = ai_client.models.generate_content(model='gemini-3.1-flash-lite', contents=f"You are a warm FRM tutor. Question: {q['question_text']}. User asks: {c_input}. Answer warmly and concisely using 'ครับจ้า'")
+                        st.session_state.practice_chat.append({"role": "model", "text": res.text})
+                    except: st.session_state.practice_chat.append({"role": "model", "text": "ขออภัยจ้า ระบบ AI ขัดข้องชั่วคราว"})
                 st.rerun()
 
     # =========================================================
-    # ⏱️ หน้าที่ 2: Mock Exam Simulator (100 ข้อ & 4 ชั่วโมงเต็ม)
+    # ⏱️ หน้าที่ 2: Mock Exam Simulator
     # =========================================================
     elif app_mode == "⏱️ Mock Exam Simulator":
         st.header(f"⏱️ Mock Exam Simulator (ผู้ใช้งานปัจจุบัน: {current_user})")
         
         if not st.session_state.mock_questions and not st.session_state.mock_completed:
             st.subheader("🎲 การตั้งค่าจัดชุดข้อสอบจำลองสนามจริง")
-            exam_size = st.slider("เลือกจำนวนข้อสอบจำลอง (Select Questions Target):", min_value=1, max_value=100, value=20, step=1)
-            duration = st.slider("เลือกเวลาทำข้อสอบ (Select Time Limit ในหน่วยนาที):", min_value=5, max_value=240, value=60, step=5)
-            
-            h_label, m_label = divmod(duration, 60)
-            st.caption(f"💡 โควตาเวลาสอบสุทธิ: **{h_label} ชั่วโมง {m_label} นาที (Total: {duration} Mins)**")
+            exam_size = st.slider("เลือกจำนวนข้อสอบจำลอง (Select Questions Target):", 1, 100, 20)
+            duration = st.slider("เลือกเวลาทำข้อสอบ (Select Time Limit ในหน่วยนาที):", 5, 240, 60, 5)
+            st.caption(f"💡 โควตาเวลาสอบสุทธิ: **{duration//60} ชั่วโมง {duration%60} นาที**")
             
             if st.button("🎬 เริ่มทำข้อสอบจำลอง (Start Exam)"):
-                w_b1 = max(1, int(exam_size * 0.20))
-                w_b2 = max(1, int(exam_size * 0.20))
-                w_b3 = max(1, int(exam_size * 0.30))
-                w_b4 = max(1, int(exam_size * 0.30))
+                pool_b1, pool_b2, pool_b3, pool_b4 = [], [], [], []
+                for x in global_pool:
+                    if "Foundations" in x['book']: pool_b1.append(x)
+                    elif "Quantitative" in x['book']: pool_b2.append(x)
+                    elif "Markets" in x['book']: pool_b3.append(x)
+                    elif "Valuation" in x['book']: pool_b4.append(x)
                 
-                pool_b1 = [x for x in global_pool if "Foundations" in x['book']]
-                pool_b2 = [x for x in global_pool if "Quantitative" in x['book']]
-                pool_b3 = [x for x in global_pool if "Markets" in x['book']]
-                pool_b4 = [x for x in global_pool if "Valuation" in x['book']]
+                sel = []
+                if pool_b1: sel.extend(random.sample(pool_b1, min(len(pool_b1), max(1, int(exam_size * 0.20)))))
+                if pool_b2: sel.extend(random.sample(pool_b2, min(len(pool_b2), max(1, int(exam_size * 0.20)))))
+                if pool_b3: sel.extend(random.sample(pool_b3, min(len(pool_b3), max(1, int(exam_size * 0.30)))))
+                if pool_b4: sel.extend(random.sample(pool_b4, min(len(pool_b4), max(1, int(exam_size * 0.30)))))
                 
-                selected_mock = []
-                if pool_b1: selected_mock.extend(random.sample(pool_b1, min(len(pool_b1), w_b1)))
-                if pool_b2: selected_mock.extend(random.sample(pool_b2, min(len(pool_b2), w_b2)))
-                if pool_b3: selected_mock.extend(random.sample(pool_b3, min(len(pool_b3), w_b3)))
-                if pool_b4: selected_mock.extend(random.sample(pool_b4, min(len(pool_b4), w_b4)))
-                
-                random.shuffle(selected_mock)
-                st.session_state.mock_questions = selected_mock
+                random.shuffle(sel)
+                st.session_state.mock_questions = sel
                 st.session_state.mock_start_time = time.time()
                 st.session_state.mock_duration_minutes = duration
                 st.session_state.mock_user_answers = {}
@@ -334,45 +313,34 @@ else:
                 
         if st.session_state.mock_questions and not st.session_state.mock_completed:
             elapsed = time.time() - st.session_state.mock_start_time
-            total_seconds = st.session_state.mock_duration_minutes * 60
-            remaining = total_seconds - elapsed
+            remaining = (st.session_state.mock_duration_minutes * 60) - elapsed
             
             if remaining <= 0:
                 st.session_state.mock_completed = True
-                st.warning("🚨 หมดเวลาทำข้อสอบจำลองแล้ว! ระบบทำการรวบรวมและตัดเกรดส่งคะแนนอัตโนมัติ...")
+                st.warning("🚨 หมดเวลาทำข้อสอบจำลองแล้ว! ระบบกำลังนำส่งคำตอบ...")
                 st.rerun()
                 
-            hours, remainder = divmod(int(remaining), 3600)
-            mins, secs = divmod(remainder, 60)
-            st.markdown(f'<div class="exam-timer">⏳ Remaining Time: {hours:02d}:{mins:02d}:{secs:02d} ชั่วโมง</div>', unsafe_allow_html=True)
+            h, rem = divmod(int(remaining), 3600)
+            m, s = divmod(rem, 60)
+            st.markdown(f'<div class="exam-timer">⏳ Remaining Time: {h:02d}:{m:02d}:{s:02d} ชั่วโมง</div>', unsafe_allow_html=True)
             
             for idx, mq in enumerate(st.session_state.mock_questions):
                 st.markdown(f"**📌 Question {idx + 1}:** ({mq['book']})")
                 st.write(mq['question_text'])
-                
                 m_opts = {"A": f"A: {mq['options'].get('A','')}", "B": f"B: {mq['options'].get('B','')}", "C": f"C: {mq['options'].get('C','')}", "D": f"D: {mq['options'].get('D','')}"}
                 current_saved = st.session_state.mock_user_answers.get(mq['question_id'], "A")
                 saved_idx = list(m_opts.keys()).index(current_saved) if current_saved in m_opts else 0
-                
                 chosen = st.radio(f"เลือกคำตอบข้อ {idx+1}:", list(m_opts.values()), index=saved_idx, key=f"mock_key_{mq['question_id']}")
                 st.session_state.mock_user_answers[mq['question_id']] = chosen[0]
                 st.markdown("---")
                 
             if st.button("🏁 กดส่งกระดาษคำตอบ (Submit Exam Sheet)", use_container_width=True):
-                correct_c = sum([1 for mq in st.session_state.mock_questions if st.session_state.mock_user_answers.get(mq['question_id']) == mq['correct_option']])
-                mock_acc = (correct_c / len(st.session_state.mock_questions)) * 100
-                st.session_state.mock_scores.append({
-                    "user": current_user,
-                    "score": mock_acc,
-                    "timestamp": time.time()
-                })
                 st.session_state.mock_completed = True
                 st.rerun()
                 
         if st.session_state.mock_completed:
             st.subheader("📊 Mock Exam Result Summary (ผลการสอบรวม)")
-            correct_count = 0
-            mock_logs = []
+            correct_count, mock_logs = 0, []
             
             for mq in st.session_state.mock_questions:
                 u_pick = st.session_state.mock_user_answers.get(mq['question_id'], "N/A")
@@ -381,165 +349,119 @@ else:
                 
                 log_id = f"M_{st.session_state.mock_start_time}_{mq['question_id']}"
                 if not any(d.get('recorded_id') == log_id and d["user"] == current_user for d in st.session_state.global_stats_log):
-                    st.session_state.global_stats_log.append({"user": current_user, "book": mq['book'], "topic": mq['topic'], "is_correct": is_correct, "recorded_id": log_id, "timestamp": time.time()})
+                    new_stat = {"user": current_user, "book": mq['book'], "topic": mq['topic'], "is_correct": is_correct, "recorded_id": log_id, "timestamp": time.time()}
+                    st.session_state.global_stats_log.append(new_stat)
+                    push_stat_to_db(new_stat)
                 
                 mock_logs.append({"Curriculum Book": mq['book'], "Your Pick": u_pick, "Correct Ans": mq['correct_option'], "Status": "✅ Correct" if is_correct else "❌ Incorrect"})
+            
+            mock_acc = (correct_count / len(st.session_state.mock_questions)) * 100
+            if not any(m.get('timestamp') == st.session_state.mock_start_time for m in st.session_state.mock_scores):
+                new_mock = {"user": current_user, "score": mock_acc, "timestamp": st.session_state.mock_start_time}
+                st.session_state.mock_scores.append(new_mock)
+                push_mock_to_db(new_mock)
                 
-            st.metric("Total Score", f"{correct_count} / {len(st.session_state.mock_questions)} ข้อ", delta=f"Accuracy Rate: {int(correct_count/len(st.session_state.mock_questions)*100)}%")
+            st.metric("Total Score", f"{correct_count} / {len(st.session_state.mock_questions)} ข้อ", delta=f"Accuracy Rate: {int(mock_acc)}%")
             st.table(pd.DataFrame(mock_logs))
             
             if st.button("🔄 ล้างหน้าจอเพื่อเริ่มทำชุดข้อสอบใหม่ (Reset Mock)"):
-                st.session_state.mock_questions = []
-                st.session_state.mock_user_answers = {}
-                st.session_state.mock_completed = False
+                st.session_state.mock_questions, st.session_state.mock_user_answers, st.session_state.mock_completed = [], {}, False
                 st.rerun()
 
     # =========================================================
-    # 📊 หน้าที่ 3: Performance & AI Insights (Radar ไร้ปัญหาตกขอบ + Progress % จำลองสอบ)
+    # 📊 หน้าที่ 3: Performance Dashboard
     # =========================================================
     elif app_mode == "📊 Performance & AI Insights":
-        st.header(f"📊 Performance Dashboard & AI Insights (ผู้ใช้งานปัจจุบัน: {current_user})")
-        
-        if not user_history:
-            st.info(f"🍃 แผงสถิติยังไม่มีข้อมูลสะสมของ {current_user} จ้า ลองเข้าทำข้อสอบจำลองหรือโหมดฝึกฝนก่อนเพื่อให้ระบบบันทึกคะแนนนะจ้า")
+        st.header(f"📊 Performance Dashboard (ผู้ใช้งานปัจจุบัน: {current_user})")
+        if not user_history: st.info(f"🍃 ยังไม่มีข้อมูลของ {current_user} ในระบบฐานข้อมูลคลาวด์จ้า ลองฝึกทำข้อสอบก่อนน้า")
         else:
             df = pd.DataFrame(user_history).sort_values(by="timestamp").reset_index(drop=True)
-            
             summary_df = df.groupby('book')['is_correct'].agg(['count', 'sum']).reset_index()
             summary_df.columns = ['Book', 'Total Questions', 'Correct Answers']
             summary_df['Accuracy (%)'] = (summary_df['Correct Answers'] / summary_df['Total Questions'] * 100).round(1)
             
-            st.subheader("📈 Summary Table (สรุปตารางวิเคราะห์รายวิชา)")
+            st.subheader("📈 Summary Table")
             st.dataframe(summary_df, use_container_width=True)
             
             col_graph1, col_graph2 = st.columns(2)
-            
-            # 🕸️ 1. กราฟเรดาร์ (Radar Chart) แบบโชว์ % และขยายขอบให้ตัวอักษรไม่ตกเฟรม
             with col_graph1:
-                st.markdown("#### 🕸️ Radar Chart Analysis (แยกตามหัวข้อวิชาหลัก)")
-                
+                st.markdown("#### 🕸️ Radar Chart Analysis")
                 all_4_books = ["Foundations of Risk Management", "Quantitative Analysis", "Financial Markets and Products", "Valuation and Risk Models"]
-                radar_data = []
-                for b in all_4_books:
-                    match = summary_df[summary_df['Book'] == b]
-                    if not match.empty:
-                        radar_data.append({"Book": b, "Accuracy (%)": match.iloc[0]['Accuracy (%)']})
-                    else:
-                        radar_data.append({"Book": b, "Accuracy (%)": 0.0})
+                radar_data = [{"Book": b, "Accuracy (%)": summary_df[summary_df['Book'] == b].iloc[0]['Accuracy (%)'] if not summary_df[summary_df['Book'] == b].empty else 0.0} for b in all_4_books]
                 radar_df = pd.DataFrame(radar_data)
                 
-                r_vals = radar_df['Accuracy (%)'].tolist()
-                r_vals.append(r_vals[0])
-                theta_vals = radar_df['Book'].tolist()
-                theta_vals.append(theta_vals[0])
-                text_vals = [f"{v}%" for v in radar_df['Accuracy (%)'].tolist()]
-                text_vals.append("") 
+                r_vals = radar_df['Accuracy (%)'].tolist() + [radar_df['Accuracy (%)'].tolist()[0]]
+                theta_vals = radar_df['Book'].tolist() + [radar_df['Book'].tolist()[0]]
+                text_vals = [f"{v}%" for v in radar_df['Accuracy (%)'].tolist()] + [""]
                 
                 fig_radar = go.Figure()
                 fig_radar.add_trace(go.Scatterpolar(
-                    r=r_vals, theta=theta_vals,
-                    fill='toself', fillcolor='rgba(143, 158, 139, 0.4)',
-                    line=dict(color='#8F9E8B', width=2),
-                    mode='lines+markers+text',
-                    text=text_vals, textposition="top center",
-                    textfont=dict(size=13, color='#4A3E3D', weight="bold")
+                    r=r_vals, theta=theta_vals, fill='toself', fillcolor='rgba(143, 158, 139, 0.4)',
+                    line=dict(color='#8F9E8B', width=2), mode='lines+markers+text',
+                    text=text_vals, textposition="top center", textfont=dict(size=13, color='#4A3E3D', weight="bold")
                 ))
-                
-                fig_radar.update_layout(
-                    polar=dict(radialaxis=dict(visible=True, range=[0, 100])),
-                    margin=dict(l=120, r=120, t=50, b=50), 
-                    paper_bgcolor='rgba(0,0,0,0)',
-                    plot_bgcolor='rgba(0,0,0,0)',
-                    showlegend=False
-                )
+                fig_radar.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 100])), margin=dict(l=120, r=120, t=50, b=50), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', showlegend=False)
                 st.plotly_chart(fig_radar, use_container_width=True)
                 
-            # 📈 2. กราฟความคืบหน้าโชว์ % ความแม่นยำของการสอบ Mock Exam แต่ละรอบ
             with col_graph2:
-                st.markdown("#### 📈 Mock Exam Session Progress (ความคืบหน้ารายครั้ง)")
-                
+                st.markdown("#### 📈 Mock Exam Session Progress")
                 user_mocks = [m for m in st.session_state.mock_scores if m["user"] == current_user]
-                if not user_mocks:
-                    st.info("🍃 กราฟนี้จะแสดงผลเมื่อคุณทำการส่งกระดาษคำตอบในโหมด Mock Exam ครบ 1 ครั้งขึ้นไปจ้า")
+                if not user_mocks: st.info("🍃 กราฟนี้จะโชว์เมื่อคุณทำโหมด Mock Exam จบ 1 ครั้งขึ้นไปจ้า")
                 else:
                     df_mock = pd.DataFrame(user_mocks)
                     df_mock['Attempt'] = df_mock.index + 1
-                    
-                    fig_progress = px.line(df_mock, x='Attempt', y='score',
-                                           title="พัฒนาการเปอร์เซ็นต์คะแนนสอบจำลอง (Mock Exam)",
-                                           labels={'Attempt': 'การสอบครั้งที่ (Attempt)', 'score': 'ความแม่นยำรวม (%)'},
-                                           markers=True, color_discrete_sequence=['#C87A7A'])
+                    fig_progress = px.line(df_mock, x='Attempt', y='score', title="พัฒนาการความแม่นยำสอบจำลอง (%)", markers=True, color_discrete_sequence=['#C87A7A'])
                     fig_progress.update_layout(yaxis=dict(range=[-5, 105]), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
                     st.plotly_chart(fig_progress, use_container_width=True)
                 
             st.markdown("---")
-            st.subheader("🧙‍♂️ AI Weakness Auditor (กล่องสรุปรายงานเฉพาะบุคคล)")
+            st.subheader("🧙‍♂️ AI Weakness Auditor")
             if st.button("✨ เจาะลึกแผนการอ่านหนังสือ (Generate AI Insights Report)"):
-                stats_text = ""
-                for index, row in summary_df.iterrows():
-                    stats_text += f"- Book '{row['Book']}': Answered {row['Total Questions']} questions, Correct {row['Correct Answers']} (Accuracy: {row['Accuracy (%)']}%)\n"
-                    
-                ai_analysis_prompt = f"""
-                You are an elite, warm Ghibli-themed FRM Risk Management Executive and a Senior Tutor. 
-                Analyze Nathan's current performance metrics below and generate a professional, highly strategic study guidance report.
-                
-                USER PROFILE: Name is {current_user}.
-                ACCURACY METRICS FOR AUDIT:
-                {stats_text}
-                
-                INSTRUCTIONS:
-                1. Identify critical structural weak areas immediately.
-                2. Give warm practitioner guidance with banking context. Use professional Thai financial vocabulary mixed with warm friendly peer-like tone. End sentences with 'ครับจ้า'.
-                """
-                with st.spinner("AI กำลังกางแผนที่หลักสูตรและจัดทำแผนการทบทวนสุดพิเศษให้คุณ..."):
+                stats_text = "".join([f"- Book '{r['Book']}': Answered {r['Total Questions']}, Correct {r['Correct Answers']} (Accuracy: {r['Accuracy (%)']}%)\n" for i, r in summary_df.iterrows()])
+                with st.spinner("AI กำลังวิเคราะห์จุดอ่อนให้คุณ..."):
                     try:
-                        ai_report = ai_client.models.generate_content(model='gemini-3.1-flash-lite', contents=ai_analysis_prompt)
+                        res = ai_client.models.generate_content(model='gemini-3.1-flash-lite', contents=f"USER: {current_user}. STATS:\n{stats_text}\nAnalyze weak areas. Give warm risk-practitioner advice in Thai. End with 'ครับจ้า'.")
                         st.markdown('<div class="tool-card">', unsafe_allow_html=True)
-                        st.markdown(f"### 📜 รายงานผลสัมฤทธิ์และกลยุทธ์เตรียมสอบฉบับเฉพาะของ {current_user}")
-                        st.write(ai_report.text)
+                        st.markdown(f"### 📜 รายงานวิเคราะห์สำหรับ {current_user}"); st.write(res.text)
                         st.markdown('</div>', unsafe_allow_html=True)
-                    except Exception as e:
-                        st.error(f"ระบบ AI ขัดข้องชั่วคราว: {e}")
+                    except: st.error("ระบบ AI ขัดข้องชั่วคราวจ้า")
 
     # =========================================================
-    # 🗂️ หน้าที่ 4: Flashcard Studio (หน้าเฉพาะสำหรับการ์ดความจำ)
+    # 🗂️ หน้าที่ 4: Flashcard Studio (ลบการ์ดได้)
     # =========================================================
     elif app_mode == "🗂️ Flashcard Studio":
-        st.header(f"🗂️ Flashcard Studio (คลังความจำเฉพาะตัวของ {current_user})")
-        st.caption("พื้นที่สร้างและทบทวนแฟลชการ์ดสไตล์กระดาษจดโน้ตน่ารัก ๆ เพื่อสกัดจุดยากไว้ท่องจำก่อนเข้าห้องสอบ ✍️")
+        st.header(f"🗂️ Flashcard Studio ({current_user})")
         
-        st.markdown('<div class="tool-card"><div class="tool-title">✨ สร้าง Flashcard ใบใหม่</div>', unsafe_allow_html=True)
+        st.markdown('<div class="tool-card"><div class="tool-title">✨ สร้าง Flashcard ใบใหม่เข้าฐานข้อมูล</div>', unsafe_allow_html=True)
         col1, col2 = st.columns(2)
-        with col1:
-            front_text = st.text_input("ด้านหน้า (Front - คำศัพท์/สูตร/คำถาม):")
-        with col2:
-            back_text = st.text_area("ด้านหลัง (Back - คำแปล/คำอธิบาย):", height=68)
-        if st.button("➕ เพิ่มลงคลังความจำส่วนตัว"):
+        with col1: front_text = st.text_input("ด้านหน้า (คำศัพท์/สูตร):")
+        with col2: back_text = st.text_area("ด้านหลัง (คำแปล):", height=68)
+        if st.button("➕ เพิ่มลงคลังความจำ"):
             if front_text.strip() and back_text.strip():
-                st.session_state.my_flashcards.append({"user": current_user, "front": front_text.strip(), "back": back_text.strip()})
-                st.success("บันทึกการ์ดสำเร็จจ้า!")
+                new_card = {"user": current_user, "front": front_text.strip(), "back": back_text.strip()}
+                st.session_state.my_flashcards.append(new_card)
+                push_flashcard_to_db(new_card) 
+                st.success("บันทึกการ์ดลงฐานข้อมูลคลาวด์สำเร็จจ้า!")
                 st.rerun()
-            else:
-                st.error("กรุณากรอกข้อมูลให้ครบทั้งด้านหน้าและด้านหลังนะจ้า")
         st.markdown('</div>', unsafe_allow_html=True)
 
         st.markdown("---")
-        st.subheader("📚 แผงตาราง Flashcard สะสมของคุณ")
-        
-        # 🛠️ [BUG FIX] ดักประเภทข้อมูล dict ป้องกัน TypeError จากของเก่า
+        st.subheader("📚 แผง Flashcard ของคุณ")
         user_cards = [c for c in st.session_state.my_flashcards if isinstance(c, dict) and c.get("user") == current_user]
         
-        if not user_cards:
-            st.info("ยังไม่มีการ์ดในคลังจ้า ลองพิมพ์คำศัพท์หรือสูตรเด็ด ๆ ด้านบนเพื่อสร้างใบแรกดูสิ!")
+        if not user_cards: st.info("ยังไม่มีการ์ดในคลังจ้า ลองพิมพ์สร้างใบแรกดูสิ!")
         else:
             for i in range(0, len(user_cards), 3):
                 cols = st.columns(3)
                 for j, c in enumerate(user_cards[i:i+3]):
                     with cols[j]:
-                        st.markdown(f"""
-                        <div class="fc-card">
-                            <div class="fc-front">{c['front']}</div>
-                            <hr class="fc-divider">
-                            <div class="fc-back">{c['back']}</div>
-                        </div>
-                        """, unsafe_allow_html=True)
+                        st.markdown(f'<div class="fc-card"><div class="fc-front">{c.get("front","")}</div><hr class="fc-divider"><div class="fc-back">{c.get("back","")}</div></div>', unsafe_allow_html=True)
+                        
+                        # 🛠️ ปุ่มสั่งลบการ์ดพร้อมสั่งล้างฐานข้อมูล
+                        st.markdown('<div class="btn-delete">', unsafe_allow_html=True)
+                        if st.button("🗑️ ลบการ์ดใบนี้", key=f"del_{i}_{j}_{c.get('front','')[:5]}"):
+                            delete_flashcard_from_db(c)
+                            st.session_state.my_flashcards = [card for card in st.session_state.my_flashcards if not (isinstance(card, dict) and card.get("user")==c.get("user") and card.get("front")==c.get("front") and card.get("back")==c.get("back"))]
+                            st.toast("🗑️ ลบการ์ดออกจากคลังเรียบร้อยจ้า!")
+                            st.rerun()
+                        st.markdown('</div>', unsafe_allow_html=True)
