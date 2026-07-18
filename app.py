@@ -146,12 +146,13 @@ if "mock_duration_minutes" not in st.session_state: st.session_state.mock_durati
 if "mock_completed" not in st.session_state: st.session_state.mock_completed = False
 
 # =========================================================
-# 🧭 6. แผงควบคุมด้านข้าง & ระบบสร้างการ์ดด่วน (Sidebar)
+# 🧭 6. แผงควบคุมด้านข้าง Ghibli Control (อัปเกรดเป็น Gamification)
 # =========================================================
 with st.sidebar:
     st.title("🌿 Ghibli Control")
     current_user = st.text_input("👤 ชื่อผู้ใช้งาน (User Name):", value="Nathan").strip()
 
+# 🚀 โหลดข้อมูลจากฐานข้อมูล
 if "db_loaded_for" not in st.session_state or st.session_state.db_loaded_for != current_user:
     with st.spinner(f"☁️ กำลังซิงค์แฟ้มประวัติของ {current_user} จาก BigQuery..."):
         s_stats, s_mocks, s_cards = fetch_user_data(current_user)
@@ -160,27 +161,30 @@ if "db_loaded_for" not in st.session_state or st.session_state.db_loaded_for != 
         st.session_state.my_flashcards = s_cards
         st.session_state.db_loaded_for = current_user
 
-with st.sidebar:
-    st.markdown("---")
-    app_mode = st.radio("เลือกพื้นที่ทำงาน (Menu):", ["📝 Practice Mode", "⏱️ Mock Exam Simulator", "📊 Performance & AI Insights", "🗂️ Flashcard Studio"])
-
+# 🧮 คำนวณคะแนนสำหรับแจกเหรียญรางวัล
 user_history = [d for d in st.session_state.global_stats_log if d["user"] == current_user]
 total_q = len(user_history)
 correct_q = sum([d["is_correct"] for d in user_history])
 overall_acc = (correct_q / total_q * 100) if total_q > 0 else 0
 
 with st.sidebar:
+    # 🏅 โซนตราประทับเกียรติยศ (ย้ายขึ้นมารวมกับ Ghibli Control ไร้ตัวเลข %)
     st.markdown("---")
-    st.metric(f"ความแม่นยำรวมของ {current_user}", f"{overall_acc:.1f}%", delta=f"ทำไปแล้ว {total_q} ข้อ")
-    
-    st.subheader("🏅 ตราประทับโอกาสสอบผ่าน")
-    if overall_acc >= 70 and total_q >= 20: st.markdown("🦦 **ราชาคาปิบาร่าออนเซ็น**\n(โอกาสสอบผ่านสูงมาก! พร้อมลุยสนามจริง)")
-    elif overall_acc >= 50 and total_q >= 10: st.markdown("🔥 **เปลวไฟ Calcifer**\n(โอกาสผ่าน 50/50 ลุยทบทวนจุดอ่อนอีกนิด!)")
-    elif total_q > 0: st.markdown("🌰 **เมล็ดโอ๊ค Totoro**\n(เพิ่งเริ่มออกเดินทาง เก็บเกี่ยวประสบการณ์ต่อไปนะ!)")
-    else: st.caption("เริ่มทำโจทย์สะสมความแม่นยำเพื่อรับการประเมินโอกาสสอบผ่านจ้า...")
+    st.subheader("🏅 ตราประทับเกียรติยศ")
+    if overall_acc >= 70 and total_q >= 20: 
+        st.markdown("🦦 **ราชาคาปิบาร่าออนเซ็น**\n(ระดับปรมาจารย์! พร้อมลุยสนามจริง)")
+    elif overall_acc >= 50 and total_q >= 10: 
+        st.markdown("🔥 **เปลวไฟ Calcifer**\n(ระดับกลาง! ลุยทบทวนจุดอ่อนอีกนิด)")
+    elif total_q > 0: 
+        st.markdown("🌰 **เมล็ดโอ๊ค Totoro**\n(นักวิเคราะห์ฝึกหัด! เก็บเกี่ยวประสบการณ์ต่อไปนะ)")
+    else: 
+        st.caption("ยังไม่มีตราประทับ เริ่มทำโจทย์เพื่อปลดล็อกจ้า...")
 
     st.markdown("---")
-    # 🛠️ [FEATURE UPGRADE] กล่องสร้าง Flashcard ด่วนใน Sidebar
+    app_mode = st.radio("เลือกพื้นที่ทำงาน (Menu):", ["📝 Practice Mode", "⏱️ Mock Exam Simulator", "📊 Performance & AI Insights", "🗂️ Flashcard Studio"])
+
+    st.markdown("---")
+    # 🛠️ กล่องสร้าง Flashcard ด่วนใน Sidebar
     st.header("✨ สร้าง Flashcard ด่วน")
     if "sb_front" not in st.session_state: st.session_state.sb_front = ""
     if "sb_back" not in st.session_state: st.session_state.sb_back = ""
@@ -194,7 +198,6 @@ with st.sidebar:
             st.session_state.my_flashcards.append(new_card)
             push_flashcard_to_db(new_card)
             st.toast("บันทึกการ์ดลงฐานข้อมูลเรียบร้อยจ้า! 🌰")
-            # เคลียร์ช่องข้อความหลังกดเซฟ
             st.session_state.sb_front = ""
             st.session_state.sb_back = ""
             st.rerun()
@@ -263,8 +266,6 @@ else:
             if q['key_vocabulary']:
                 for item in q['key_vocabulary']: st.markdown(f"🔹 **{item.get('word','')}** : {item.get('translation','')}")
             else: st.caption("ข้อนี้ไม่มีศัพท์เทคนิคยากเพิ่มเติมจ้า")
-                
-            # 🛠️ นำกล่องบันทึก Flashcard เดิมออกไป เพื่อให้พื้นที่สะอาดตา (ใช้ของ Sidebar แทน)
                     
             st.markdown('<div class="tool-card"><div class="tool-title">🧙‍♂️ ช่องแชทติวเตอร์เวทมนตร์ (AI Tutor)</div></div>', unsafe_allow_html=True)
             for m in st.session_state.practice_chat:
@@ -435,7 +436,6 @@ else:
         st.header(f"🗂️ Flashcard Studio ({current_user})")
         st.caption("พื้นที่สำหรับทบทวนและบริหารจัดการคลังความจำเฉพาะตัว ✍️")
         
-        # 🛠️ นำกล่องสร้างของหน้านี้ออกไปด้วยเพื่อหลีกเลี่ยงความซ้ำซ้อน เพราะย้ายไปรวมที่ Sidebar หมดแล้ว
         st.markdown("---")
         st.subheader("📚 แผง Flashcard ของคุณ")
         user_cards = [c for c in st.session_state.my_flashcards if isinstance(c, dict) and c.get("user") == current_user]
