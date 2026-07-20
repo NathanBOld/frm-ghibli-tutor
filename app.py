@@ -55,13 +55,13 @@ else:
 ai_client = genai.Client(api_key=GEMINI_API_KEY)
 
 # =========================================================
-# 🗄️ 3. ฟังก์ชันฐานข้อมูล (แยกระบุคอลัมน์ให้ตรงตามตารางที่มีอยู่จริง)
+# 🗄️ 3. ฟังก์ชันฐานข้อมูล (ใส่ Schema ให้ครบถ้วนตรงกับ BigQuery)
 # =========================================================
 @st.cache_resource(show_spinner=False)
 def ensure_db_tables_exist():
     dataset_ref = bq_client.dataset("FRM_DATASET", project="frm-ai-tutor")
     
-    # 🛠️ ตาราง user_stats ใช้คอลัมน์ 'user_name'
+    # 1. user_stats
     schema_stats = [
         bigquery.SchemaField("user_name", "STRING"), bigquery.SchemaField("book", "STRING"),
         bigquery.SchemaField("topic", "STRING"), bigquery.SchemaField("is_correct", "INTEGER"),
@@ -71,15 +71,16 @@ def ensure_db_tables_exist():
     bq_client.create_table(t_stats, exists_ok=True)
     bq_client.update_table(t_stats, ["schema"]) 
     
-    # 🛠️ ตาราง flashcards ใช้คอลัมน์ 'username' (เขียนติดกัน)
+    # 2. flashcards (เพิ่ม timestamp เข้าไปตามที่ BigQuery ฟ้อง)
     schema_fc = [
-        bigquery.SchemaField("username", "STRING"), bigquery.SchemaField("front", "STRING"), bigquery.SchemaField("back", "STRING"),
+        bigquery.SchemaField("username", "STRING"), bigquery.SchemaField("front", "STRING"), 
+        bigquery.SchemaField("back", "STRING"), bigquery.SchemaField("timestamp", "FLOAT"),
     ]
     t_fc = bigquery.Table(dataset_ref.table("flashcards"), schema=schema_fc)
     bq_client.create_table(t_fc, exists_ok=True)
     bq_client.update_table(t_fc, ["schema"])
     
-    # 🛠️ ตาราง mock_scores ใช้คอลัมน์ 'user_name'
+    # 3. mock_scores
     schema_mock = [
         bigquery.SchemaField("user_name", "STRING"), bigquery.SchemaField("score", "FLOAT"), bigquery.SchemaField("timestamp", "FLOAT"),
     ]
@@ -112,9 +113,10 @@ def push_mock_to_db(mock_log):
 
 def push_flashcard_to_db(fc):
     try:
-        q = "INSERT INTO `frm-ai-tutor.FRM_DATASET.flashcards` (username, front, back) VALUES (@u, @f, @b)"
+        q = "INSERT INTO `frm-ai-tutor.FRM_DATASET.flashcards` (username, front, back, timestamp) VALUES (@u, @f, @b, @ts)"
         cfg = bigquery.QueryJobConfig(query_parameters=[
-            bigquery.ScalarQueryParameter("u", "STRING", fc["user"]), bigquery.ScalarQueryParameter("f", "STRING", fc["front"]), bigquery.ScalarQueryParameter("b", "STRING", fc["back"])
+            bigquery.ScalarQueryParameter("u", "STRING", fc["user"]), bigquery.ScalarQueryParameter("f", "STRING", fc["front"]),
+            bigquery.ScalarQueryParameter("b", "STRING", fc["back"]), bigquery.ScalarQueryParameter("ts", "FLOAT", time.time())
         ])
         bq_client.query(q, job_config=cfg).result()
     except Exception as e: st.error(f"❌ บันทึก Flashcard ไม่สำเร็จ: {e}")
@@ -123,7 +125,9 @@ def delete_flashcard_from_db(fc):
     try:
         q = "DELETE FROM `frm-ai-tutor.FRM_DATASET.flashcards` WHERE username = @u AND front = @f AND back = @b"
         cfg = bigquery.QueryJobConfig(query_parameters=[
-            bigquery.ScalarQueryParameter("u", "STRING", fc.get("user")), bigquery.ScalarQueryParameter("f", "STRING", fc.get("front")), bigquery.ScalarQueryParameter("b", "STRING", fc.get("back"))
+            bigquery.ScalarQueryParameter("u", "STRING", fc.get("user")),
+            bigquery.ScalarQueryParameter("f", "STRING", fc.get("front")),
+            bigquery.ScalarQueryParameter("b", "STRING", fc.get("back"))
         ])
         bq_client.query(q, job_config=cfg).result()
     except Exception as e: st.error(f"❌ ลบ Flashcard ไม่สำเร็จ: {e}")
@@ -133,15 +137,12 @@ def fetch_user_data(username):
     try:
         cfg = bigquery.QueryJobConfig(query_parameters=[bigquery.ScalarQueryParameter("u", "STRING", username)])
         
-        # ค้นหาด้วย user_name
         s_rows = bq_client.query("SELECT * FROM `frm-ai-tutor.FRM_DATASET.user_stats` WHERE user_name = @u", job_config=cfg).result()
         stats = [{"user": r.user_name, "book": r.book, "topic": r.topic, "is_correct": r.is_correct, "recorded_id": r.recorded_id, "timestamp": r.timestamp} for r in s_rows]
         
-        # ค้นหาด้วย user_name
         m_rows = bq_client.query("SELECT * FROM `frm-ai-tutor.FRM_DATASET.mock_scores` WHERE user_name = @u", job_config=cfg).result()
         mocks = [{"user": r.user_name, "score": r.score, "timestamp": r.timestamp} for r in m_rows]
         
-        # ค้นหาด้วย username
         c_rows = bq_client.query("SELECT * FROM `frm-ai-tutor.FRM_DATASET.flashcards` WHERE username = @u", job_config=cfg).result()
         cards = [{"user": r.username, "front": r.front, "back": r.back} for r in c_rows]
     except Exception as e: st.error(f"❌ ดึงข้อมูลจากฐานข้อมูลไม่สำเร็จ: {e}")
