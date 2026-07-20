@@ -11,7 +11,7 @@ from google.cloud import bigquery
 from google.oauth2 import service_account
 
 # =========================================================
-# 🎨 1. ตั้งค่าหน้าเพจ (ต้องอยู่บนสุดเสมอ)
+# 🎨 1. ตั้งค่าหน้าเพจ
 # =========================================================
 st.set_page_config(page_title="FRM Ghibli Central", page_icon="🌿", layout="wide")
 
@@ -55,31 +55,31 @@ else:
 ai_client = genai.Client(api_key=GEMINI_API_KEY)
 
 # =========================================================
-# 🗄️ 3. ฟังก์ชันฐานข้อมูล (เพิ่มระบบ Auto-Repair โครงสร้าง)
+# 🗄️ 3. ฟังก์ชันฐานข้อมูล (แก้ Schema กลับเป็น username)
 # =========================================================
 @st.cache_resource(show_spinner=False)
 def ensure_db_tables_exist():
     dataset_ref = bq_client.dataset("FRM_DATASET", project="frm-ai-tutor")
     
-    # 🛠️ คืนชีพ Schema เพื่อให้ BigQuery รู้จักคอลัมน์
+    # 🛠️ ปรับกลับเป็น 'username' ตามที่ BigQuery มีอยู่เดิม
     schema_stats = [
-        bigquery.SchemaField("user_name", "STRING"), bigquery.SchemaField("book", "STRING"),
+        bigquery.SchemaField("username", "STRING"), bigquery.SchemaField("book", "STRING"),
         bigquery.SchemaField("topic", "STRING"), bigquery.SchemaField("is_correct", "INTEGER"),
         bigquery.SchemaField("recorded_id", "STRING"), bigquery.SchemaField("timestamp", "FLOAT"),
     ]
     t_stats = bigquery.Table(dataset_ref.table("user_stats"), schema=schema_stats)
     bq_client.create_table(t_stats, exists_ok=True)
-    bq_client.update_table(t_stats, ["schema"]) # 🛠️ บังคับอัปเดตซ่อมแซมคอลัมน์ที่ขาดหายไป
+    bq_client.update_table(t_stats, ["schema"]) 
     
     schema_fc = [
-        bigquery.SchemaField("user_name", "STRING"), bigquery.SchemaField("front", "STRING"), bigquery.SchemaField("back", "STRING"),
+        bigquery.SchemaField("username", "STRING"), bigquery.SchemaField("front", "STRING"), bigquery.SchemaField("back", "STRING"),
     ]
     t_fc = bigquery.Table(dataset_ref.table("flashcards"), schema=schema_fc)
     bq_client.create_table(t_fc, exists_ok=True)
     bq_client.update_table(t_fc, ["schema"])
     
     schema_mock = [
-        bigquery.SchemaField("user_name", "STRING"), bigquery.SchemaField("score", "FLOAT"), bigquery.SchemaField("timestamp", "FLOAT"),
+        bigquery.SchemaField("username", "STRING"), bigquery.SchemaField("score", "FLOAT"), bigquery.SchemaField("timestamp", "FLOAT"),
     ]
     t_mock = bigquery.Table(dataset_ref.table("mock_scores"), schema=schema_mock)
     bq_client.create_table(t_mock, exists_ok=True)
@@ -90,7 +90,7 @@ except Exception as e: st.error(f"Table Creation Error: {e}")
 
 def push_stat_to_db(stat):
     try:
-        q = "INSERT INTO `frm-ai-tutor.FRM_DATASET.user_stats` (user_name, book, topic, is_correct, recorded_id, timestamp) VALUES (@u, @b, @t, @c, @r, @ts)"
+        q = "INSERT INTO `frm-ai-tutor.FRM_DATASET.user_stats` (username, book, topic, is_correct, recorded_id, timestamp) VALUES (@u, @b, @t, @c, @r, @ts)"
         cfg = bigquery.QueryJobConfig(query_parameters=[
             bigquery.ScalarQueryParameter("u", "STRING", stat["user"]), bigquery.ScalarQueryParameter("b", "STRING", stat["book"]),
             bigquery.ScalarQueryParameter("t", "STRING", stat["topic"]), bigquery.ScalarQueryParameter("c", "INTEGER", stat["is_correct"]),
@@ -101,7 +101,7 @@ def push_stat_to_db(stat):
 
 def push_mock_to_db(mock_log):
     try:
-        q = "INSERT INTO `frm-ai-tutor.FRM_DATASET.mock_scores` (user_name, score, timestamp) VALUES (@u, @s, @ts)"
+        q = "INSERT INTO `frm-ai-tutor.FRM_DATASET.mock_scores` (username, score, timestamp) VALUES (@u, @s, @ts)"
         cfg = bigquery.QueryJobConfig(query_parameters=[
             bigquery.ScalarQueryParameter("u", "STRING", mock_log["user"]), bigquery.ScalarQueryParameter("s", "FLOAT", mock_log["score"]), bigquery.ScalarQueryParameter("ts", "FLOAT", mock_log["timestamp"])
         ])
@@ -110,7 +110,7 @@ def push_mock_to_db(mock_log):
 
 def push_flashcard_to_db(fc):
     try:
-        q = "INSERT INTO `frm-ai-tutor.FRM_DATASET.flashcards` (user_name, front, back) VALUES (@u, @f, @b)"
+        q = "INSERT INTO `frm-ai-tutor.FRM_DATASET.flashcards` (username, front, back) VALUES (@u, @f, @b)"
         cfg = bigquery.QueryJobConfig(query_parameters=[
             bigquery.ScalarQueryParameter("u", "STRING", fc["user"]), bigquery.ScalarQueryParameter("f", "STRING", fc["front"]), bigquery.ScalarQueryParameter("b", "STRING", fc["back"])
         ])
@@ -119,7 +119,7 @@ def push_flashcard_to_db(fc):
 
 def delete_flashcard_from_db(fc):
     try:
-        q = "DELETE FROM `frm-ai-tutor.FRM_DATASET.flashcards` WHERE user_name = @u AND front = @f AND back = @b"
+        q = "DELETE FROM `frm-ai-tutor.FRM_DATASET.flashcards` WHERE username = @u AND front = @f AND back = @b"
         cfg = bigquery.QueryJobConfig(query_parameters=[
             bigquery.ScalarQueryParameter("u", "STRING", fc.get("user")), bigquery.ScalarQueryParameter("f", "STRING", fc.get("front")), bigquery.ScalarQueryParameter("b", "STRING", fc.get("back"))
         ])
@@ -131,14 +131,14 @@ def fetch_user_data(username):
     try:
         cfg = bigquery.QueryJobConfig(query_parameters=[bigquery.ScalarQueryParameter("u", "STRING", username)])
         
-        s_rows = bq_client.query("SELECT * FROM `frm-ai-tutor.FRM_DATASET.user_stats` WHERE user_name = @u", job_config=cfg).result()
-        stats = [{"user": r.user_name, "book": r.book, "topic": r.topic, "is_correct": r.is_correct, "recorded_id": r.recorded_id, "timestamp": r.timestamp} for r in s_rows]
+        s_rows = bq_client.query("SELECT * FROM `frm-ai-tutor.FRM_DATASET.user_stats` WHERE username = @u", job_config=cfg).result()
+        stats = [{"user": r.username, "book": r.book, "topic": r.topic, "is_correct": r.is_correct, "recorded_id": r.recorded_id, "timestamp": r.timestamp} for r in s_rows]
         
-        m_rows = bq_client.query("SELECT * FROM `frm-ai-tutor.FRM_DATASET.mock_scores` WHERE user_name = @u", job_config=cfg).result()
-        mocks = [{"user": r.user_name, "score": r.score, "timestamp": r.timestamp} for r in m_rows]
+        m_rows = bq_client.query("SELECT * FROM `frm-ai-tutor.FRM_DATASET.mock_scores` WHERE username = @u", job_config=cfg).result()
+        mocks = [{"user": r.username, "score": r.score, "timestamp": r.timestamp} for r in m_rows]
         
-        c_rows = bq_client.query("SELECT * FROM `frm-ai-tutor.FRM_DATASET.flashcards` WHERE user_name = @u", job_config=cfg).result()
-        cards = [{"user": r.user_name, "front": r.front, "back": r.back} for r in c_rows]
+        c_rows = bq_client.query("SELECT * FROM `frm-ai-tutor.FRM_DATASET.flashcards` WHERE username = @u", job_config=cfg).result()
+        cards = [{"user": r.username, "front": r.front, "back": r.back} for r in c_rows]
     except Exception as e: st.error(f"❌ ดึงข้อมูลจากฐานข้อมูลไม่สำเร็จ: {e}")
     return stats, mocks, cards
 
