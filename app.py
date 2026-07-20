@@ -55,70 +55,52 @@ else:
 ai_client = genai.Client(api_key=GEMINI_API_KEY)
 
 # =========================================================
-# 🗄️ 3. ฟังก์ชันฐานข้อมูล (ใส่ Schema ให้ครบถ้วนตรงกับ BigQuery)
+# 🗄️ 3. ฟังก์ชันฐานข้อมูล (ใช้ insert_rows_json เพื่อเลี่ยงข้อจำกัด Free Tier)
 # =========================================================
 @st.cache_resource(show_spinner=False)
 def ensure_db_tables_exist():
     dataset_ref = bq_client.dataset("FRM_DATASET", project="frm-ai-tutor")
     
-    # 1. user_stats
     schema_stats = [
         bigquery.SchemaField("user_name", "STRING"), bigquery.SchemaField("book", "STRING"),
         bigquery.SchemaField("topic", "STRING"), bigquery.SchemaField("is_correct", "INTEGER"),
         bigquery.SchemaField("recorded_id", "STRING"), bigquery.SchemaField("timestamp", "FLOAT"),
     ]
-    t_stats = bigquery.Table(dataset_ref.table("user_stats"), schema=schema_stats)
-    bq_client.create_table(t_stats, exists_ok=True)
-    bq_client.update_table(t_stats, ["schema"]) 
+    bq_client.create_table(bigquery.Table(dataset_ref.table("user_stats"), schema=schema_stats), exists_ok=True)
     
-    # 2. flashcards (เพิ่ม timestamp เข้าไปตามที่ BigQuery ฟ้อง)
     schema_fc = [
         bigquery.SchemaField("username", "STRING"), bigquery.SchemaField("front", "STRING"), 
         bigquery.SchemaField("back", "STRING"), bigquery.SchemaField("timestamp", "FLOAT"),
     ]
-    t_fc = bigquery.Table(dataset_ref.table("flashcards"), schema=schema_fc)
-    bq_client.create_table(t_fc, exists_ok=True)
-    bq_client.update_table(t_fc, ["schema"])
+    bq_client.create_table(bigquery.Table(dataset_ref.table("flashcards"), schema=schema_fc), exists_ok=True)
     
-    # 3. mock_scores
     schema_mock = [
         bigquery.SchemaField("user_name", "STRING"), bigquery.SchemaField("score", "FLOAT"), bigquery.SchemaField("timestamp", "FLOAT"),
     ]
-    t_mock = bigquery.Table(dataset_ref.table("mock_scores"), schema=schema_mock)
-    bq_client.create_table(t_mock, exists_ok=True)
-    bq_client.update_table(t_mock, ["schema"])
+    bq_client.create_table(bigquery.Table(dataset_ref.table("mock_scores"), schema=schema_mock), exists_ok=True)
 
 try: ensure_db_tables_exist()
 except Exception as e: st.error(f"Table Creation Error: {e}")
 
 def push_stat_to_db(stat):
     try:
-        q = "INSERT INTO `frm-ai-tutor.FRM_DATASET.user_stats` (user_name, book, topic, is_correct, recorded_id, timestamp) VALUES (@u, @b, @t, @c, @r, @ts)"
-        cfg = bigquery.QueryJobConfig(query_parameters=[
-            bigquery.ScalarQueryParameter("u", "STRING", stat["user"]), bigquery.ScalarQueryParameter("b", "STRING", stat["book"]),
-            bigquery.ScalarQueryParameter("t", "STRING", stat["topic"]), bigquery.ScalarQueryParameter("c", "INTEGER", stat["is_correct"]),
-            bigquery.ScalarQueryParameter("r", "STRING", stat["recorded_id"]), bigquery.ScalarQueryParameter("ts", "FLOAT", stat["timestamp"])
-        ])
-        bq_client.query(q, job_config=cfg).result()
+        rows_to_insert = [{"user_name": stat["user"], "book": stat["book"], "topic": stat["topic"], "is_correct": stat["is_correct"], "recorded_id": stat["recorded_id"], "timestamp": stat["timestamp"]}]
+        errors = bq_client.insert_rows_json("frm-ai-tutor.FRM_DATASET.user_stats", rows_to_insert)
+        if errors: st.error(f"❌ บันทึกสถิติไม่สำเร็จ: {errors}")
     except Exception as e: st.error(f"❌ บันทึกสถิติไม่สำเร็จ: {e}")
 
 def push_mock_to_db(mock_log):
     try:
-        q = "INSERT INTO `frm-ai-tutor.FRM_DATASET.mock_scores` (user_name, score, timestamp) VALUES (@u, @s, @ts)"
-        cfg = bigquery.QueryJobConfig(query_parameters=[
-            bigquery.ScalarQueryParameter("u", "STRING", mock_log["user"]), bigquery.ScalarQueryParameter("s", "FLOAT", mock_log["score"]), bigquery.ScalarQueryParameter("ts", "FLOAT", mock_log["timestamp"])
-        ])
-        bq_client.query(q, job_config=cfg).result()
+        rows_to_insert = [{"user_name": mock_log["user"], "score": mock_log["score"], "timestamp": mock_log["timestamp"]}]
+        errors = bq_client.insert_rows_json("frm-ai-tutor.FRM_DATASET.mock_scores", rows_to_insert)
+        if errors: st.error(f"❌ บันทึก Mock Exam ไม่สำเร็จ: {errors}")
     except Exception as e: st.error(f"❌ บันทึก Mock Exam ไม่สำเร็จ: {e}")
 
 def push_flashcard_to_db(fc):
     try:
-        q = "INSERT INTO `frm-ai-tutor.FRM_DATASET.flashcards` (username, front, back, timestamp) VALUES (@u, @f, @b, @ts)"
-        cfg = bigquery.QueryJobConfig(query_parameters=[
-            bigquery.ScalarQueryParameter("u", "STRING", fc["user"]), bigquery.ScalarQueryParameter("f", "STRING", fc["front"]),
-            bigquery.ScalarQueryParameter("b", "STRING", fc["back"]), bigquery.ScalarQueryParameter("ts", "FLOAT", time.time())
-        ])
-        bq_client.query(q, job_config=cfg).result()
+        rows_to_insert = [{"username": fc["user"], "front": fc["front"], "back": fc["back"], "timestamp": time.time()}]
+        errors = bq_client.insert_rows_json("frm-ai-tutor.FRM_DATASET.flashcards", rows_to_insert)
+        if errors: st.error(f"❌ บันทึก Flashcard ไม่สำเร็จ: {errors}")
     except Exception as e: st.error(f"❌ บันทึก Flashcard ไม่สำเร็จ: {e}")
 
 def delete_flashcard_from_db(fc):
@@ -487,7 +469,7 @@ else:
         
         st.markdown("---")
         st.subheader("📚 แผง Flashcard ของคุณ")
-        user_cards = [c for c in st.session_state.my_flashcards if isinstance(c, dict) and c.get("user") == current_user]
+        user_cards = [c for c in st.session_state.my_flashcards if isinstance(c, dict) and c.get("user"] == current_user]
         
         if not user_cards: st.info("ยังไม่มีการ์ดในคลังจ้า ลองพิมพ์คำศัพท์หรือสูตรสร้างใบแรกที่แถบเครื่องมือด้านซ้ายมือดูสิ!")
         else:
