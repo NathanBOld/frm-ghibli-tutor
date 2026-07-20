@@ -11,7 +11,38 @@ from google.cloud import bigquery
 from google.oauth2 import service_account
 
 # =========================================================
-# 🔒 1. ระบบเชื่อมต่อ Cloud & Database (Auto-detect Project ID)
+# 🎨 1. ตั้งค่าหน้าเพจ (ต้องอยู่บนสุดของ Streamlit เสมอ)
+# =========================================================
+st.set_page_config(page_title="FRM Ghibli Central", page_icon="🌿", layout="wide")
+
+st.markdown("""
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;600&display=swap');
+    [data-testid="stAppViewContainer"], [data-testid="stSidebar"], .stApp { background-color: #FFFDF9 !important; color: #4A3E3D !important; font-family: 'Sarabun', sans-serif; }
+    .stButton>button { background-color: #8F9E8B !important; color: white !important; border-radius: 12px !important; border: none !important; padding: 8px 20px !important; transition: all 0.3s; }
+    .stButton>button:hover { background-color: #72826E !important; transform: translateY(-2px); }
+    .btn-delete>button { background-color: #C87A7A !important; font-size: 0.85rem !important; padding: 4px 10px !important; margin-top: 5px; }
+    .btn-delete>button:hover { background-color: #B56565 !important; }
+    .tool-card { background-color: #F4EFEA !important; padding: 18px; border-radius: 14px; border-left: 6px solid #8F9E8B; margin-bottom: 20px; }
+    .exam-timer { font-size: 1.6rem; font-weight: 600; color: #C87A7A; background-color: #FCEAEA; padding: 12px; border-radius: 10px; text-align: center; margin-bottom: 15px; }
+    .fc-card { background-color: #FFFDF9; border: 2px solid #D9C5B2; border-radius: 12px; padding: 20px; text-align: center; box-shadow: 2px 4px 8px rgba(0,0,0,0.04); height: 100%; transition: transform 0.2s; }
+    .fc-card:hover { transform: scale(1.02); }
+    .fc-front { color: #8F9E8B; font-weight: 600; font-size: 1.15rem; }
+    .fc-divider { border-top: 1.5px dashed #D9C5B2; margin: 12px 0; }
+    .fc-back { color: #4A3E3D; font-size: 0.95rem; }
+    
+    /* 🏆 CSS สำหรับกรอบทองคำ Ghibli Academy Rewards */
+    .gold-frame-container { text-align: center; margin-top: 15px; margin-bottom: 20px; }
+    .gold-frame { display: inline-block; padding: 6px; background: linear-gradient(135deg, #FFDF00 0%, #DAA520 50%, #B8860B 100%); border-radius: 100px; box-shadow: 0 6px 12px rgba(218, 165, 32, 0.3); margin-bottom: 15px; }
+    .gold-frame img { width: 150px; height: 150px; object-fit: cover; border-radius: 50%; border: 3px solid #FFF8DC; display: block; background-color: white; }
+    .badge-text-outside { color: #4A3E3D; font-size: 0.90rem; line-height: 1.4; }
+    .badge-level { font-weight: 600; font-size: 1.2rem; color: #DAA520; margin-bottom: 4px;}
+    .badge-title { font-weight: 600; font-size: 1.05rem; color: #4A3E3D; }
+    </style>
+""", unsafe_allow_html=True)
+
+# =========================================================
+# 🔒 2. ระบบเชื่อมต่อ Cloud & Database
 # =========================================================
 GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY"))
 
@@ -28,25 +59,14 @@ else:
 ai_client = genai.Client(api_key=GEMINI_API_KEY)
 
 # =========================================================
-# 🗄️ 2. ระบบ Auto-Sync ฐานข้อมูล (เปลี่ยนเป็น Synchronous INSERT)
+# 🗄️ 3. ฟังก์ชันฐานข้อมูล (ยิงตรงผ่าน INSERT INTO)
 # =========================================================
 @st.cache_resource(show_spinner=False)
 def ensure_db_tables_exist():
     dataset_ref = bq_client.dataset("FRM_DATASET")
-    schema_stats = [
-        bigquery.SchemaField("user_name", "STRING"), bigquery.SchemaField("book", "STRING"),
-        bigquery.SchemaField("topic", "STRING"), bigquery.SchemaField("is_correct", "INTEGER"),
-        bigquery.SchemaField("recorded_id", "STRING"), bigquery.SchemaField("timestamp", "FLOAT"),
-    ]
-    bq_client.create_table(bigquery.Table(dataset_ref.table("user_stats"), schema=schema_stats), exists_ok=True)
-    schema_fc = [
-        bigquery.SchemaField("user_name", "STRING"), bigquery.SchemaField("front", "STRING"), bigquery.SchemaField("back", "STRING"),
-    ]
-    bq_client.create_table(bigquery.Table(dataset_ref.table("flashcards"), schema=schema_fc), exists_ok=True)
-    schema_mock = [
-        bigquery.SchemaField("user_name", "STRING"), bigquery.SchemaField("score", "FLOAT"), bigquery.SchemaField("timestamp", "FLOAT"),
-    ]
-    bq_client.create_table(bigquery.Table(dataset_ref.table("mock_scores"), schema=schema_mock), exists_ok=True)
+    bq_client.create_table(bigquery.Table(dataset_ref.table("user_stats")), exists_ok=True)
+    bq_client.create_table(bigquery.Table(dataset_ref.table("flashcards")), exists_ok=True)
+    bq_client.create_table(bigquery.Table(dataset_ref.table("mock_scores")), exists_ok=True)
 
 try: ensure_db_tables_exist()
 except: pass
@@ -105,55 +125,6 @@ def fetch_user_data(username):
     except Exception as e: print(f"Load Error: {e}")
     return stats, mocks, cards
 
-# =========================================================
-# 🎨 3. ตั้งค่าธีมโฮมสเตย์กิบลิอบอุ่น (CSS)
-# =========================================================
-st.set_page_config(page_title="FRM Ghibli Central", page_icon="🌿", layout="wide")
-
-st.markdown("""
-    <style>
-    @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;600&display=swap');
-    [data-testid="stAppViewContainer"], [data-testid="stSidebar"], .stApp { background-color: #FFFDF9 !important; color: #4A3E3D !important; font-family: 'Sarabun', sans-serif; }
-    .stButton>button { background-color: #8F9E8B !important; color: white !important; border-radius: 12px !important; border: none !important; padding: 8px 20px !important; transition: all 0.3s; }
-    .stButton>button:hover { background-color: #72826E !important; transform: translateY(-2px); }
-    .btn-delete>button { background-color: #C87A7A !important; font-size: 0.85rem !important; padding: 4px 10px !important; margin-top: 5px; }
-    .btn-delete>button:hover { background-color: #B56565 !important; }
-    .tool-card { background-color: #F4EFEA !important; padding: 18px; border-radius: 14px; border-left: 6px solid #8F9E8B; margin-bottom: 20px; }
-    .exam-timer { font-size: 1.6rem; font-weight: 600; color: #C87A7A; background-color: #FCEAEA; padding: 12px; border-radius: 10px; text-align: center; margin-bottom: 15px; }
-    .fc-card { background-color: #FFFDF9; border: 2px solid #D9C5B2; border-radius: 12px; padding: 20px; text-align: center; box-shadow: 2px 4px 8px rgba(0,0,0,0.04); height: 100%; transition: transform 0.2s; }
-    .fc-card:hover { transform: scale(1.02); }
-    .fc-front { color: #8F9E8B; font-weight: 600; font-size: 1.15rem; }
-    .fc-divider { border-top: 1.5px dashed #D9C5B2; margin: 12px 0; }
-    .fc-back { color: #4A3E3D; font-size: 0.95rem; }
-    
-    /* 🏆 CSS สำหรับกรอบทองคำ Ghibli Academy Rewards */
-    .gold-frame-container { text-align: center; margin-top: 15px; margin-bottom: 20px; }
-    .gold-frame {
-        display: inline-block;
-        padding: 6px;
-        background: linear-gradient(135deg, #FFDF00 0%, #DAA520 50%, #B8860B 100%);
-        border-radius: 100px; 
-        box-shadow: 0 6px 12px rgba(218, 165, 32, 0.3);
-        margin-bottom: 15px;
-    }
-    .gold-frame img {
-        width: 150px;
-        height: 150px;
-        object-fit: cover;
-        border-radius: 50%; 
-        border: 3px solid #FFF8DC;
-        display: block;
-        background-color: white;
-    }
-    .badge-text-outside { color: #4A3E3D; font-size: 0.90rem; line-height: 1.4; }
-    .badge-level { font-weight: 600; font-size: 1.2rem; color: #DAA520; margin-bottom: 4px;}
-    .badge-title { font-weight: 600; font-size: 1.05rem; color: #4A3E3D; }
-    </style>
-""", unsafe_allow_html=True)
-
-# =========================================================
-# 📊 4. ฟังก์ชันดึงคลังข้อสอบจาก BigQuery Cloud
-# =========================================================
 @st.cache_data(show_spinner=False)
 def load_global_questions():
     try:
@@ -173,7 +144,7 @@ def load_global_questions():
 global_pool = load_global_questions()
 
 # =========================================================
-# ⚙️ 5. บริหารกลไกตัวแปรระบบหลัก (Session State)
+# ⚙️ 4. บริหารกลไกตัวแปรระบบหลัก (Session State)
 # =========================================================
 if "practice_idx" not in st.session_state: st.session_state.practice_idx = 0
 if "practice_submitted" not in st.session_state: st.session_state.practice_submitted = False
@@ -185,7 +156,7 @@ if "mock_duration_minutes" not in st.session_state: st.session_state.mock_durati
 if "mock_completed" not in st.session_state: st.session_state.mock_completed = False
 
 # =========================================================
-# 🧭 6. แผงควบคุมด้านข้าง (Ghibli Gamification Control 5 Levels)
+# 🧭 5. แผงควบคุมด้านข้าง (Sidebar & Ghibli Gamification)
 # =========================================================
 with st.sidebar:
     st.title("🌿 Ghibli Control")
@@ -199,39 +170,28 @@ if "db_loaded_for" not in st.session_state or st.session_state.db_loaded_for != 
         st.session_state.my_flashcards = s_cards
         st.session_state.db_loaded_for = current_user
 
-# 🧮 คำนวณเลเวลเพื่อปลดล็อกตราประทับ 5 อันดับ
 user_history = [d for d in st.session_state.global_stats_log if d["user"] == current_user]
 total_q = len(user_history)
 correct_q = sum([d["is_correct"] for d in user_history])
 overall_acc = (correct_q / total_q * 100) if total_q > 0 else 0
 
 with st.sidebar:
-    # 🏅 โซนตราประทับเกียรติยศ (ใช้ลิงก์ Raw GIF สยบอาการภาพดำ)
+    # 🏅 โซนตราประทับเกียรติยศ (Ghibli Academy Rewards - 5 Levels)
     if overall_acc >= 90 and total_q >= 10: 
         gif_url = "https://media1.tenor.com/m/7H-O7G8a1YcAAAAC/the-cat-returns-baron.gif"
-        level_txt = "Level 5"
-        title = "จ้าวแห่งสวนสวรรค์"
-        desc = "The Baron (from The Cat Returns)"
+        level_txt = "Level 5"; title = "จ้าวแห่งสวนสวรรค์"; desc = "The Baron (from The Cat Returns)"
     elif overall_acc >= 75 and total_q >= 5: 
         gif_url = "https://media1.tenor.com/m/W2hVn4E7dO0AAAAC/castle-in-the-sky-laputa.gif"
-        level_txt = "Level 4"
-        title = "ผู้พิทักษ์ปราสาทลอยฟ้า"
-        desc = "Guardian of the floating Castle (Laputa)"
+        level_txt = "Level 4"; title = "ผู้พิทักษ์ปราสาทลอยฟ้า"; desc = "Guardian of the floating Castle (Laputa)"
     elif overall_acc >= 60 and total_q >= 3: 
         gif_url = "https://media1.tenor.com/m/0iI2O01C46EAAAAC/kiki-kikis-delivery-service.gif"
-        level_txt = "Level 3"
-        title = "นักสำรวจเวทมนตร์"
-        desc = "A young student of Magic"
+        level_txt = "Level 3"; title = "นักสำรวจเวทมนตร์"; desc = "A young student of Magic"
     elif overall_acc >= 40 and total_q > 0: 
         gif_url = "https://media1.tenor.com/m/R_Z1l4F7Cg8AAAAC/laputa-robot.gif"
-        level_txt = "Level 2"
-        title = "นักบินฝึกหัด"
-        desc = "Friendly Laputan robot | apprentice pilot"
+        level_txt = "Level 2"; title = "นักบินฝึกหัด"; desc = "Friendly Laputan robot | apprentice pilot"
     elif total_q > 0: 
         gif_url = "https://media1.tenor.com/m/qLh2P8-tYJcAAAAC/kodama-princess-mononoke.gif"
-        level_txt = "Level 1"
-        title = "ต้นกล้าแห่งความเพียร"
-        desc = "A tiny Kodama from Princess Mononoke"
+        level_txt = "Level 1"; title = "ต้นกล้าแห่งความเพียร"; desc = "A tiny Kodama from Princess Mononoke"
     else: 
         gif_url = None
 
@@ -255,25 +215,22 @@ with st.sidebar:
     app_mode = st.radio("เลือกพื้นที่ทำงาน (Menu):", ["📝 Practice Mode", "⏱️ Mock Exam Simulator", "📊 Performance & AI Insights", "🗂️ Flashcard Studio"])
 
     st.markdown("---")
-    # 🛠️ กล่องสร้าง Flashcard ด่วนใน Sidebar
+    # 🛠️ กล่องสร้าง Flashcard ด่วนใน Sidebar (ใช้ st.form ป้องกัน StreamlitAPIException)
     st.header("✨ สร้าง Flashcard ด่วน")
-    if "sb_front" not in st.session_state: st.session_state.sb_front = ""
-    if "sb_back" not in st.session_state: st.session_state.sb_back = ""
-    
-    sb_front = st.text_input("ด้านหน้า (คำศัพท์/สูตร):", key="sb_front")
-    sb_back = st.text_area("ด้านหลัง (คำแปล/คำอธิบาย):", height=68, key="sb_back")
-    
-    if st.button("💾 เซฟลงคลัง (Save)", use_container_width=True):
-        if sb_front.strip() and sb_back.strip():
-            new_card = {"user": current_user, "front": sb_front.strip(), "back": sb_back.strip()}
-            st.session_state.my_flashcards.append(new_card)
-            push_flashcard_to_db(new_card)
-            st.toast("บันทึกการ์ดลงฐานข้อมูลเรียบร้อยจ้า! 🌰")
-            st.session_state.sb_front = ""
-            st.session_state.sb_back = ""
-            st.rerun()
-        else:
-            st.error("กรุณากรอกให้ครบทั้งหน้าและหลังจ้า")
+    with st.form("quick_add_form", clear_on_submit=True):
+        sb_front = st.text_input("ด้านหน้า (คำศัพท์/สูตร):")
+        sb_back = st.text_area("ด้านหลัง (คำแปล/คำอธิบาย):", height=68)
+        submitted = st.form_submit_button("💾 เซฟลงคลัง (Save)")
+        
+        if submitted:
+            if sb_front.strip() and sb_back.strip():
+                new_card = {"user": current_user, "front": sb_front.strip(), "back": sb_back.strip()}
+                st.session_state.my_flashcards.append(new_card)
+                push_flashcard_to_db(new_card)
+                st.toast("บันทึกการ์ดลงฐานข้อมูลเรียบร้อยจ้า! 🌰")
+                st.rerun() # รีโหลดเพจเพื่อแสดงข้อมูลใหม่ทันที
+            else:
+                st.error("กรุณากรอกให้ครบทั้งหน้าและหลังจ้า")
 
 if not global_pool:
     st.warning("⚠️ ไม่พบข้อมูลโจทย์ในคลังข้อสอบคลาวด์ BigQuery กรุณาตรวจสอบการรันไฟล์ pipeline.py จ้า!")
@@ -501,26 +458,28 @@ else:
                     except: st.error("ระบบ AI ขัดข้องชั่วคราวจ้า")
 
     # =========================================================
-    # # ... (ส่วนบนของโค้ดให้คงเดิมไว้ จนถึงช่วง Sidebar ส่วน Flashcard) ...
-
-    st.markdown("---")
-    # 🛠️ [FIXED] แก้ไขกลไกการเซฟและล้างค่าช่องข้อความ ไม่ให้ชนกับ Streamlit Widget State
-    st.header("✨ สร้าง Flashcard ด่วน")
-    
-    # 1. ใช้ form เพื่อจัดการ state ของ widget ให้จบในตัวเดียว
-    with st.form("quick_add_form", clear_on_submit=True):
-        sb_front = st.text_input("ด้านหน้า (คำศัพท์/สูตร):")
-        sb_back = st.text_area("ด้านหลัง (คำแปล/คำอธิบาย):", height=68)
-        submitted = st.form_submit_button("💾 เซฟลงคลัง (Save)")
+    # 🗂️ หน้าที่ 4: Flashcard Studio 
+    # =========================================================
+    elif app_mode == "🗂️ Flashcard Studio":
+        st.header(f"🗂️ Flashcard Studio ({current_user})")
+        st.caption("พื้นที่สำหรับทบทวนและบริหารจัดการคลังความจำเฉพาะตัว ✍️")
         
-        if submitted:
-            if sb_front.strip() and sb_back.strip():
-                new_card = {"user": current_user, "front": sb_front.strip(), "back": sb_back.strip()}
-                st.session_state.my_flashcards.append(new_card)
-                push_flashcard_to_db(new_card)
-                st.toast("บันทึกการ์ดลงฐานข้อมูลเรียบร้อยจ้า! 🌰")
-                # clear_on_submit=True จะเคลียร์ค่าให้เองอัตโนมัติ ไม่ต้องสั่ง st.session_state
-            else:
-                st.error("กรุณากรอกให้ครบทั้งหน้าและหลังจ้า")
-
-# ... (ส่วนล่างของโค้ดให้คงเดิมไว้) ...
+        st.markdown("---")
+        st.subheader("📚 แผง Flashcard ของคุณ")
+        user_cards = [c for c in st.session_state.my_flashcards if isinstance(c, dict) and c.get("user") == current_user]
+        
+        if not user_cards: st.info("ยังไม่มีการ์ดในคลังจ้า ลองพิมพ์คำศัพท์หรือสูตรสร้างใบแรกที่แถบเครื่องมือด้านซ้ายมือดูสิ!")
+        else:
+            for i in range(0, len(user_cards), 3):
+                cols = st.columns(3)
+                for j, c in enumerate(user_cards[i:i+3]):
+                    with cols[j]:
+                        st.markdown(f'<div class="fc-card"><div class="fc-front">{c.get("front","")}</div><hr class="fc-divider"><div class="fc-back">{c.get("back","")}</div></div>', unsafe_allow_html=True)
+                        
+                        st.markdown('<div class="btn-delete">', unsafe_allow_html=True)
+                        if st.button("🗑️ ลบการ์ดใบนี้", key=f"del_{i}_{j}_{c.get('front','')[:5]}"):
+                            delete_flashcard_from_db(c)
+                            st.session_state.my_flashcards = [card for card in st.session_state.my_flashcards if not (isinstance(card, dict) and card.get("user")==c.get("user") and card.get("front")==c.get("front") and card.get("back")==c.get("back"))]
+                            st.toast("🗑️ ลบการ์ดออกจากคลังเรียบร้อยจ้า!")
+                            st.rerun()
+                        st.markdown('</div>', unsafe_allow_html=True)
