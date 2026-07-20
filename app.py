@@ -11,7 +11,7 @@ from google.cloud import bigquery
 from google.oauth2 import service_account
 
 # =========================================================
-# 🎨 1. ตั้งค่าหน้าเพจ (ต้องอยู่บนสุดของ Streamlit เสมอ)
+# 🎨 1. ตั้งค่าหน้าเพจ (ต้องอยู่บนสุดเสมอ)
 # =========================================================
 st.set_page_config(page_title="FRM Ghibli Central", page_icon="🌿", layout="wide")
 
@@ -30,8 +30,6 @@ st.markdown("""
     .fc-front { color: #8F9E8B; font-weight: 600; font-size: 1.15rem; }
     .fc-divider { border-top: 1.5px dashed #D9C5B2; margin: 12px 0; }
     .fc-back { color: #4A3E3D; font-size: 0.95rem; }
-    
-    /* 🏆 CSS สำหรับกรอบทองคำ Ghibli Academy Rewards */
     .gold-frame-container { text-align: center; margin-top: 15px; margin-bottom: 20px; }
     .gold-frame { display: inline-block; padding: 6px; background: linear-gradient(135deg, #FFDF00 0%, #DAA520 50%, #B8860B 100%); border-radius: 100px; box-shadow: 0 6px 12px rgba(218, 165, 32, 0.3); margin-bottom: 15px; }
     .gold-frame img { width: 150px; height: 150px; object-fit: cover; border-radius: 50%; border: 3px solid #FFF8DC; display: block; background-color: white; }
@@ -50,85 +48,104 @@ if "GCP_JSON_TEXT" in st.secrets:
     gcp_info = json.loads(st.secrets["GCP_JSON_TEXT"])
     credentials = service_account.Credentials.from_service_account_info(gcp_info)
     bq_client = bigquery.Client(credentials=credentials, project=gcp_info["project_id"])
-    PROJECT_ID = gcp_info["project_id"]
 else:
     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "frm-ai-tutor-1cef93cd880b.json"
     bq_client = bigquery.Client()
-    PROJECT_ID = bq_client.project
 
 ai_client = genai.Client(api_key=GEMINI_API_KEY)
 
 # =========================================================
-# 🗄️ 3. ฟังก์ชันฐานข้อมูล (ยิงตรงผ่าน INSERT INTO)
+# 🗄️ 3. ฟังก์ชันฐานข้อมูล (เพิ่มระบบ Auto-Repair โครงสร้าง)
 # =========================================================
 @st.cache_resource(show_spinner=False)
 def ensure_db_tables_exist():
-    dataset_ref = bq_client.dataset("FRM_DATASET")
-    bq_client.create_table(bigquery.Table(dataset_ref.table("user_stats")), exists_ok=True)
-    bq_client.create_table(bigquery.Table(dataset_ref.table("flashcards")), exists_ok=True)
-    bq_client.create_table(bigquery.Table(dataset_ref.table("mock_scores")), exists_ok=True)
+    dataset_ref = bq_client.dataset("FRM_DATASET", project="frm-ai-tutor")
+    
+    # 🛠️ คืนชีพ Schema เพื่อให้ BigQuery รู้จักคอลัมน์
+    schema_stats = [
+        bigquery.SchemaField("user_name", "STRING"), bigquery.SchemaField("book", "STRING"),
+        bigquery.SchemaField("topic", "STRING"), bigquery.SchemaField("is_correct", "INTEGER"),
+        bigquery.SchemaField("recorded_id", "STRING"), bigquery.SchemaField("timestamp", "FLOAT"),
+    ]
+    t_stats = bigquery.Table(dataset_ref.table("user_stats"), schema=schema_stats)
+    bq_client.create_table(t_stats, exists_ok=True)
+    bq_client.update_table(t_stats, ["schema"]) # 🛠️ บังคับอัปเดตซ่อมแซมคอลัมน์ที่ขาดหายไป
+    
+    schema_fc = [
+        bigquery.SchemaField("user_name", "STRING"), bigquery.SchemaField("front", "STRING"), bigquery.SchemaField("back", "STRING"),
+    ]
+    t_fc = bigquery.Table(dataset_ref.table("flashcards"), schema=schema_fc)
+    bq_client.create_table(t_fc, exists_ok=True)
+    bq_client.update_table(t_fc, ["schema"])
+    
+    schema_mock = [
+        bigquery.SchemaField("user_name", "STRING"), bigquery.SchemaField("score", "FLOAT"), bigquery.SchemaField("timestamp", "FLOAT"),
+    ]
+    t_mock = bigquery.Table(dataset_ref.table("mock_scores"), schema=schema_mock)
+    bq_client.create_table(t_mock, exists_ok=True)
+    bq_client.update_table(t_mock, ["schema"])
 
 try: ensure_db_tables_exist()
-except: pass
+except Exception as e: st.error(f"Table Creation Error: {e}")
 
 def push_stat_to_db(stat):
     try:
-        q = f"INSERT INTO `{PROJECT_ID}.FRM_DATASET.user_stats` (user_name, book, topic, is_correct, recorded_id, timestamp) VALUES (@u, @b, @t, @c, @r, @ts)"
+        q = "INSERT INTO `frm-ai-tutor.FRM_DATASET.user_stats` (user_name, book, topic, is_correct, recorded_id, timestamp) VALUES (@u, @b, @t, @c, @r, @ts)"
         cfg = bigquery.QueryJobConfig(query_parameters=[
             bigquery.ScalarQueryParameter("u", "STRING", stat["user"]), bigquery.ScalarQueryParameter("b", "STRING", stat["book"]),
             bigquery.ScalarQueryParameter("t", "STRING", stat["topic"]), bigquery.ScalarQueryParameter("c", "INTEGER", stat["is_correct"]),
             bigquery.ScalarQueryParameter("r", "STRING", stat["recorded_id"]), bigquery.ScalarQueryParameter("ts", "FLOAT", stat["timestamp"])
         ])
         bq_client.query(q, job_config=cfg).result()
-    except Exception as e: print(f"DB Error: {e}")
+    except Exception as e: st.error(f"❌ บันทึกสถิติไม่สำเร็จ: {e}")
 
 def push_mock_to_db(mock_log):
     try:
-        q = f"INSERT INTO `{PROJECT_ID}.FRM_DATASET.mock_scores` (user_name, score, timestamp) VALUES (@u, @s, @ts)"
+        q = "INSERT INTO `frm-ai-tutor.FRM_DATASET.mock_scores` (user_name, score, timestamp) VALUES (@u, @s, @ts)"
         cfg = bigquery.QueryJobConfig(query_parameters=[
             bigquery.ScalarQueryParameter("u", "STRING", mock_log["user"]), bigquery.ScalarQueryParameter("s", "FLOAT", mock_log["score"]), bigquery.ScalarQueryParameter("ts", "FLOAT", mock_log["timestamp"])
         ])
         bq_client.query(q, job_config=cfg).result()
-    except: pass
+    except Exception as e: st.error(f"❌ บันทึก Mock Exam ไม่สำเร็จ: {e}")
 
 def push_flashcard_to_db(fc):
     try:
-        q = f"INSERT INTO `{PROJECT_ID}.FRM_DATASET.flashcards` (user_name, front, back) VALUES (@u, @f, @b)"
+        q = "INSERT INTO `frm-ai-tutor.FRM_DATASET.flashcards` (user_name, front, back) VALUES (@u, @f, @b)"
         cfg = bigquery.QueryJobConfig(query_parameters=[
             bigquery.ScalarQueryParameter("u", "STRING", fc["user"]), bigquery.ScalarQueryParameter("f", "STRING", fc["front"]), bigquery.ScalarQueryParameter("b", "STRING", fc["back"])
         ])
         bq_client.query(q, job_config=cfg).result()
-    except: pass
+    except Exception as e: st.error(f"❌ บันทึก Flashcard ไม่สำเร็จ: {e}")
 
 def delete_flashcard_from_db(fc):
     try:
-        q = f"DELETE FROM `{PROJECT_ID}.FRM_DATASET.flashcards` WHERE user_name = @u AND front = @f AND back = @b"
+        q = "DELETE FROM `frm-ai-tutor.FRM_DATASET.flashcards` WHERE user_name = @u AND front = @f AND back = @b"
         cfg = bigquery.QueryJobConfig(query_parameters=[
             bigquery.ScalarQueryParameter("u", "STRING", fc.get("user")), bigquery.ScalarQueryParameter("f", "STRING", fc.get("front")), bigquery.ScalarQueryParameter("b", "STRING", fc.get("back"))
         ])
         bq_client.query(q, job_config=cfg).result()
-    except: pass
+    except Exception as e: st.error(f"❌ ลบ Flashcard ไม่สำเร็จ: {e}")
 
 def fetch_user_data(username):
     stats, mocks, cards = [], [], []
     try:
         cfg = bigquery.QueryJobConfig(query_parameters=[bigquery.ScalarQueryParameter("u", "STRING", username)])
         
-        s_rows = bq_client.query(f"SELECT * FROM `{PROJECT_ID}.FRM_DATASET.user_stats` WHERE user_name = @u", job_config=cfg).result()
+        s_rows = bq_client.query("SELECT * FROM `frm-ai-tutor.FRM_DATASET.user_stats` WHERE user_name = @u", job_config=cfg).result()
         stats = [{"user": r.user_name, "book": r.book, "topic": r.topic, "is_correct": r.is_correct, "recorded_id": r.recorded_id, "timestamp": r.timestamp} for r in s_rows]
         
-        m_rows = bq_client.query(f"SELECT * FROM `{PROJECT_ID}.FRM_DATASET.mock_scores` WHERE user_name = @u", job_config=cfg).result()
+        m_rows = bq_client.query("SELECT * FROM `frm-ai-tutor.FRM_DATASET.mock_scores` WHERE user_name = @u", job_config=cfg).result()
         mocks = [{"user": r.user_name, "score": r.score, "timestamp": r.timestamp} for r in m_rows]
         
-        c_rows = bq_client.query(f"SELECT * FROM `{PROJECT_ID}.FRM_DATASET.flashcards` WHERE user_name = @u", job_config=cfg).result()
+        c_rows = bq_client.query("SELECT * FROM `frm-ai-tutor.FRM_DATASET.flashcards` WHERE user_name = @u", job_config=cfg).result()
         cards = [{"user": r.user_name, "front": r.front, "back": r.back} for r in c_rows]
-    except Exception as e: print(f"Load Error: {e}")
+    except Exception as e: st.error(f"❌ ดึงข้อมูลจากฐานข้อมูลไม่สำเร็จ: {e}")
     return stats, mocks, cards
 
 @st.cache_data(show_spinner=False)
 def load_global_questions():
     try:
-        rows = bq_client.query(f"SELECT * FROM `{PROJECT_ID}.FRM_DATASET.questions`").result()
+        rows = bq_client.query("SELECT * FROM `frm-ai-tutor.FRM_DATASET.questions`").result()
         pool = []
         for row in rows:
             pool.append({
@@ -144,7 +161,7 @@ def load_global_questions():
 global_pool = load_global_questions()
 
 # =========================================================
-# ⚙️ 4. บริหารกลไกตัวแปรระบบหลัก (Session State)
+# ⚙️ 4. บริหารกลไกตัวแปรระบบหลัก
 # =========================================================
 if "practice_idx" not in st.session_state: st.session_state.practice_idx = 0
 if "practice_submitted" not in st.session_state: st.session_state.practice_submitted = False
@@ -156,7 +173,7 @@ if "mock_duration_minutes" not in st.session_state: st.session_state.mock_durati
 if "mock_completed" not in st.session_state: st.session_state.mock_completed = False
 
 # =========================================================
-# 🧭 5. แผงควบคุมด้านข้าง (Sidebar & Ghibli Gamification)
+# 🧭 5. แผงควบคุมด้านข้าง (Sidebar)
 # =========================================================
 with st.sidebar:
     st.title("🌿 Ghibli Control")
@@ -176,7 +193,6 @@ correct_q = sum([d["is_correct"] for d in user_history])
 overall_acc = (correct_q / total_q * 100) if total_q > 0 else 0
 
 with st.sidebar:
-    # 🏅 โซนตราประทับเกียรติยศ (Ghibli Academy Rewards - 5 Levels)
     if overall_acc >= 90 and total_q >= 10: 
         gif_url = "https://media1.tenor.com/m/7H-O7G8a1YcAAAAC/the-cat-returns-baron.gif"
         level_txt = "Level 5"; title = "จ้าวแห่งสวนสวรรค์"; desc = "The Baron (from The Cat Returns)"
@@ -209,13 +225,12 @@ with st.sidebar:
             </div>
         ''', unsafe_allow_html=True)
     else:
-        st.caption("🎮 Ghibli Academy Rewards: เริ่มต้นทำโจทย์ข้อแรกเพื่อปลดล็อกเกียรติยศจ้า...")
+        st.caption("🎮 เริ่มต้นทำโจทย์ข้อแรกเพื่อปลดล็อกเกียรติยศจ้า...")
 
     st.markdown("---")
     app_mode = st.radio("เลือกพื้นที่ทำงาน (Menu):", ["📝 Practice Mode", "⏱️ Mock Exam Simulator", "📊 Performance & AI Insights", "🗂️ Flashcard Studio"])
 
     st.markdown("---")
-    # 🛠️ กล่องสร้าง Flashcard ด่วนใน Sidebar (ใช้ st.form ป้องกัน StreamlitAPIException)
     st.header("✨ สร้าง Flashcard ด่วน")
     with st.form("quick_add_form", clear_on_submit=True):
         sb_front = st.text_input("ด้านหน้า (คำศัพท์/สูตร):")
@@ -228,7 +243,7 @@ with st.sidebar:
                 st.session_state.my_flashcards.append(new_card)
                 push_flashcard_to_db(new_card)
                 st.toast("บันทึกการ์ดลงฐานข้อมูลเรียบร้อยจ้า! 🌰")
-                st.rerun() # รีโหลดเพจเพื่อแสดงข้อมูลใหม่ทันที
+                st.rerun() 
             else:
                 st.error("กรุณากรอกให้ครบทั้งหน้าและหลังจ้า")
 
