@@ -55,7 +55,7 @@ else:
 ai_client = genai.Client(api_key=GEMINI_API_KEY)
 
 # =========================================================
-# 🗄️ 3. ฟังก์ชันฐานข้อมูล (เปลี่ยนเป็น INSERT DML หลีกเลี่ยง Free Tier Error)
+# 🗄️ 3. ฟังก์ชันฐานข้อมูล (ใช้ Load Jobs เพื่อผ่านข้อจำกัด Free Tier)
 # =========================================================
 @st.cache_resource(show_spinner=False)
 def ensure_db_tables_exist():
@@ -79,83 +79,58 @@ def ensure_db_tables_exist():
     ]
     bq_client.create_table(bigquery.Table(dataset_ref.table("mock_scores"), schema=schema_mock), exists_ok=True)
 
-try: 
-    ensure_db_tables_exist()
-except Exception as e: 
-    st.error(f"Table Creation Error: {e}")
+try: ensure_db_tables_exist()
+except Exception as e: st.error(f"Table Creation Error: {e}")
 
-# --- แก้ไขฟังก์ชันบันทึกข้อมูลเป็น DML Query ---
 def push_stat_to_db(stat):
     try:
-        query = """
-            INSERT INTO `frm-ai-tutor.FRM_DATASET.user_stats` 
-            (user_name, book, topic, is_correct, recorded_id, timestamp)
-            VALUES (@u, @b, @t, @c, @r, @time)
-        """
-        job_config = bigquery.QueryJobConfig(
-            query_parameters=[
-                bigquery.ScalarQueryParameter("u", "STRING", stat["user"]),
-                bigquery.ScalarQueryParameter("b", "STRING", stat["book"]),
-                bigquery.ScalarQueryParameter("t", "STRING", stat["topic"]),
-                bigquery.ScalarQueryParameter("c", "INTEGER", stat["is_correct"]),
-                bigquery.ScalarQueryParameter("r", "STRING", stat["recorded_id"]),
-                bigquery.ScalarQueryParameter("time", "FLOAT", stat["timestamp"]),
-            ]
-        )
-        bq_client.query(query, job_config=job_config).result()
-    except Exception as e: 
-        st.error(f"❌ บันทึกสถิติไม่สำเร็จ: {e}")
+        rows = [{"user_name": stat["user"], "book": stat["book"], "topic": stat["topic"], "is_correct": stat["is_correct"], "recorded_id": stat["recorded_id"], "timestamp": stat["timestamp"]}]
+        job_config = bigquery.LoadJobConfig(write_disposition=bigquery.WriteDisposition.WRITE_APPEND)
+        job = bq_client.load_table_from_json(rows, "frm-ai-tutor.FRM_DATASET.user_stats", job_config=job_config)
+        job.result()
+    except Exception as e: st.error(f"❌ บันทึกสถิติไม่สำเร็จ: {e}")
 
 def push_mock_to_db(mock_log):
     try:
-        query = """
-            INSERT INTO `frm-ai-tutor.FRM_DATASET.mock_scores` 
-            (user_name, score, timestamp)
-            VALUES (@u, @s, @time)
-        """
-        job_config = bigquery.QueryJobConfig(
-            query_parameters=[
-                bigquery.ScalarQueryParameter("u", "STRING", mock_log["user"]),
-                bigquery.ScalarQueryParameter("s", "FLOAT", mock_log["score"]),
-                bigquery.ScalarQueryParameter("time", "FLOAT", mock_log["timestamp"]),
-            ]
-        )
-        bq_client.query(query, job_config=job_config).result()
-    except Exception as e: 
-        st.error(f"❌ บันทึก Mock Exam ไม่สำเร็จ: {e}")
+        rows = [{"user_name": mock_log["user"], "score": mock_log["score"], "timestamp": mock_log["timestamp"]}]
+        job_config = bigquery.LoadJobConfig(write_disposition=bigquery.WriteDisposition.WRITE_APPEND)
+        job = bq_client.load_table_from_json(rows, "frm-ai-tutor.FRM_DATASET.mock_scores", job_config=job_config)
+        job.result()
+    except Exception as e: st.error(f"❌ บันทึก Mock Exam ไม่สำเร็จ: {e}")
 
 def push_flashcard_to_db(fc):
     try:
-        # สังเกตว่าตารางนี้ใช้คำว่า username ตาม Schema
-        query = """
-            INSERT INTO `frm-ai-tutor.FRM_DATASET.flashcards` 
-            (username, front, back, timestamp)
-            VALUES (@u, @f, @b, @time)
-        """
-        job_config = bigquery.QueryJobConfig(
-            query_parameters=[
-                bigquery.ScalarQueryParameter("u", "STRING", fc["user"]),
-                bigquery.ScalarQueryParameter("f", "STRING", fc["front"]),
-                bigquery.ScalarQueryParameter("b", "STRING", fc["back"]),
-                bigquery.ScalarQueryParameter("time", "FLOAT", time.time()),
-            ]
-        )
-        bq_client.query(query, job_config=job_config).result()
-    except Exception as e: 
-        st.error(f"❌ บันทึก Flashcard ไม่สำเร็จ: {e}")
-# ---------------------------------------------
+        rows = [{"username": fc["user"], "front": fc["front"], "back": fc["back"], "timestamp": time.time()}]
+        job_config = bigquery.LoadJobConfig(write_disposition=bigquery.WriteDisposition.WRITE_APPEND)
+        job = bq_client.load_table_from_json(rows, "frm-ai-tutor.FRM_DATASET.flashcards", job_config=job_config)
+        job.result()
+    except Exception as e: st.error(f"❌ บันทึก Flashcard ไม่สำเร็จ: {e}")
 
 def delete_flashcard_from_db(fc):
     try:
-        q = "DELETE FROM `frm-ai-tutor.FRM_DATASET.flashcards` WHERE username = @u AND front = @f AND back = @b"
-        cfg = bigquery.QueryJobConfig(query_parameters=[
-            bigquery.ScalarQueryParameter("u", "STRING", fc.get("user")),
-            bigquery.ScalarQueryParameter("f", "STRING", fc.get("front")),
-            bigquery.ScalarQueryParameter("b", "STRING", fc.get("back"))
-        ])
-        bq_client.query(q, job_config=cfg).result()
-    except Exception as e: 
-        st.error(f"❌ ลบ Flashcard ไม่สำเร็จ: {e}")
+        query = "SELECT * FROM `frm-ai-tutor.FRM_DATASET.flashcards`"
+        rows = bq_client.query(query).result()
+        
+        kept_rows = []
+        for r in rows:
+            if not (r.username == fc.get("user") and r.front == fc.get("front") and r.back == fc.get("back")):
+                kept_rows.append({"username": r.username, "front": r.front, "back": r.back, "timestamp": r.timestamp})
+        
+        if kept_rows:
+            schema = [
+                bigquery.SchemaField("username", "STRING"), bigquery.SchemaField("front", "STRING"), 
+                bigquery.SchemaField("back", "STRING"), bigquery.SchemaField("timestamp", "FLOAT")
+            ]
+            job_config = bigquery.LoadJobConfig(write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE, schema=schema)
+            job = bq_client.load_table_from_json(kept_rows, "frm-ai-tutor.FRM_DATASET.flashcards", job_config=job_config)
+            job.result()
+        else:
+            ddl = """
+                CREATE OR REPLACE TABLE `frm-ai-tutor.FRM_DATASET.flashcards`
+                (username STRING, front STRING, back STRING, timestamp FLOAT64)
+            """
+            bq_client.query(ddl).result()
+    except Exception as e: st.error(f"❌ ลบ Flashcard ไม่สำเร็จ: {e}")
 
 def fetch_user_data(username):
     stats, mocks, cards = [], [], []
@@ -170,8 +145,7 @@ def fetch_user_data(username):
         
         c_rows = bq_client.query("SELECT * FROM `frm-ai-tutor.FRM_DATASET.flashcards` WHERE username = @u", job_config=cfg).result()
         cards = [{"user": r.username, "front": r.front, "back": r.back} for r in c_rows]
-    except Exception as e: 
-        st.error(f"❌ ดึงข้อมูลจากฐานข้อมูลไม่สำเร็จ: {e}")
+    except Exception as e: st.error(f"❌ ดึงข้อมูลจากฐานข้อมูลไม่สำเร็จ: {e}")
     return stats, mocks, cards
 
 @st.cache_data(show_spinner=False)
