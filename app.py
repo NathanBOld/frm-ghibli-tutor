@@ -55,7 +55,7 @@ else:
 ai_client = genai.Client(api_key=GEMINI_API_KEY)
 
 # =========================================================
-# 🗄️ 3. ฟังก์ชันฐานข้อมูล (ใช้ insert_rows_json เพื่อเลี่ยงข้อจำกัด Free Tier)
+# 🗄️ 3. ฟังก์ชันฐานข้อมูล (เปลี่ยนเป็น INSERT DML หลีกเลี่ยง Free Tier Error)
 # =========================================================
 @st.cache_resource(show_spinner=False)
 def ensure_db_tables_exist():
@@ -79,29 +79,71 @@ def ensure_db_tables_exist():
     ]
     bq_client.create_table(bigquery.Table(dataset_ref.table("mock_scores"), schema=schema_mock), exists_ok=True)
 
-try: ensure_db_tables_exist()
-except Exception as e: st.error(f"Table Creation Error: {e}")
+try: 
+    ensure_db_tables_exist()
+except Exception as e: 
+    st.error(f"Table Creation Error: {e}")
 
+# --- แก้ไขฟังก์ชันบันทึกข้อมูลเป็น DML Query ---
 def push_stat_to_db(stat):
     try:
-        rows_to_insert = [{"user_name": stat["user"], "book": stat["book"], "topic": stat["topic"], "is_correct": stat["is_correct"], "recorded_id": stat["recorded_id"], "timestamp": stat["timestamp"]}]
-        errors = bq_client.insert_rows_json("frm-ai-tutor.FRM_DATASET.user_stats", rows_to_insert)
-        if errors: st.error(f"❌ บันทึกสถิติไม่สำเร็จ: {errors}")
-    except Exception as e: st.error(f"❌ บันทึกสถิติไม่สำเร็จ: {e}")
+        query = """
+            INSERT INTO `frm-ai-tutor.FRM_DATASET.user_stats` 
+            (user_name, book, topic, is_correct, recorded_id, timestamp)
+            VALUES (@u, @b, @t, @c, @r, @time)
+        """
+        job_config = bigquery.QueryJobConfig(
+            query_parameters=[
+                bigquery.ScalarQueryParameter("u", "STRING", stat["user"]),
+                bigquery.ScalarQueryParameter("b", "STRING", stat["book"]),
+                bigquery.ScalarQueryParameter("t", "STRING", stat["topic"]),
+                bigquery.ScalarQueryParameter("c", "INTEGER", stat["is_correct"]),
+                bigquery.ScalarQueryParameter("r", "STRING", stat["recorded_id"]),
+                bigquery.ScalarQueryParameter("time", "FLOAT", stat["timestamp"]),
+            ]
+        )
+        bq_client.query(query, job_config=job_config).result()
+    except Exception as e: 
+        st.error(f"❌ บันทึกสถิติไม่สำเร็จ: {e}")
 
 def push_mock_to_db(mock_log):
     try:
-        rows_to_insert = [{"user_name": mock_log["user"], "score": mock_log["score"], "timestamp": mock_log["timestamp"]}]
-        errors = bq_client.insert_rows_json("frm-ai-tutor.FRM_DATASET.mock_scores", rows_to_insert)
-        if errors: st.error(f"❌ บันทึก Mock Exam ไม่สำเร็จ: {errors}")
-    except Exception as e: st.error(f"❌ บันทึก Mock Exam ไม่สำเร็จ: {e}")
+        query = """
+            INSERT INTO `frm-ai-tutor.FRM_DATASET.mock_scores` 
+            (user_name, score, timestamp)
+            VALUES (@u, @s, @time)
+        """
+        job_config = bigquery.QueryJobConfig(
+            query_parameters=[
+                bigquery.ScalarQueryParameter("u", "STRING", mock_log["user"]),
+                bigquery.ScalarQueryParameter("s", "FLOAT", mock_log["score"]),
+                bigquery.ScalarQueryParameter("time", "FLOAT", mock_log["timestamp"]),
+            ]
+        )
+        bq_client.query(query, job_config=job_config).result()
+    except Exception as e: 
+        st.error(f"❌ บันทึก Mock Exam ไม่สำเร็จ: {e}")
 
 def push_flashcard_to_db(fc):
     try:
-        rows_to_insert = [{"username": fc["user"], "front": fc["front"], "back": fc["back"], "timestamp": time.time()}]
-        errors = bq_client.insert_rows_json("frm-ai-tutor.FRM_DATASET.flashcards", rows_to_insert)
-        if errors: st.error(f"❌ บันทึก Flashcard ไม่สำเร็จ: {errors}")
-    except Exception as e: st.error(f"❌ บันทึก Flashcard ไม่สำเร็จ: {e}")
+        # สังเกตว่าตารางนี้ใช้คำว่า username ตาม Schema
+        query = """
+            INSERT INTO `frm-ai-tutor.FRM_DATASET.flashcards` 
+            (username, front, back, timestamp)
+            VALUES (@u, @f, @b, @time)
+        """
+        job_config = bigquery.QueryJobConfig(
+            query_parameters=[
+                bigquery.ScalarQueryParameter("u", "STRING", fc["user"]),
+                bigquery.ScalarQueryParameter("f", "STRING", fc["front"]),
+                bigquery.ScalarQueryParameter("b", "STRING", fc["back"]),
+                bigquery.ScalarQueryParameter("time", "FLOAT", time.time()),
+            ]
+        )
+        bq_client.query(query, job_config=job_config).result()
+    except Exception as e: 
+        st.error(f"❌ บันทึก Flashcard ไม่สำเร็จ: {e}")
+# ---------------------------------------------
 
 def delete_flashcard_from_db(fc):
     try:
@@ -112,7 +154,8 @@ def delete_flashcard_from_db(fc):
             bigquery.ScalarQueryParameter("b", "STRING", fc.get("back"))
         ])
         bq_client.query(q, job_config=cfg).result()
-    except Exception as e: st.error(f"❌ ลบ Flashcard ไม่สำเร็จ: {e}")
+    except Exception as e: 
+        st.error(f"❌ ลบ Flashcard ไม่สำเร็จ: {e}")
 
 def fetch_user_data(username):
     stats, mocks, cards = [], [], []
@@ -127,7 +170,8 @@ def fetch_user_data(username):
         
         c_rows = bq_client.query("SELECT * FROM `frm-ai-tutor.FRM_DATASET.flashcards` WHERE username = @u", job_config=cfg).result()
         cards = [{"user": r.username, "front": r.front, "back": r.back} for r in c_rows]
-    except Exception as e: st.error(f"❌ ดึงข้อมูลจากฐานข้อมูลไม่สำเร็จ: {e}")
+    except Exception as e: 
+        st.error(f"❌ ดึงข้อมูลจากฐานข้อมูลไม่สำเร็จ: {e}")
     return stats, mocks, cards
 
 @st.cache_data(show_spinner=False)
@@ -149,7 +193,7 @@ def load_global_questions():
 global_pool = load_global_questions()
 
 # =========================================================
-# ⚙️ 4. บริหารกลไกตัวแปรระบบหลัก
+# ⚙️ 4. บริหารกลไกตัวแปรระบบหลัก (เพิ่มป้องกัน KeyError)
 # =========================================================
 if "practice_idx" not in st.session_state: st.session_state.practice_idx = 0
 if "practice_submitted" not in st.session_state: st.session_state.practice_submitted = False
@@ -159,6 +203,10 @@ if "mock_user_answers" not in st.session_state: st.session_state.mock_user_answe
 if "mock_start_time" not in st.session_state: st.session_state.mock_start_time = None
 if "mock_duration_minutes" not in st.session_state: st.session_state.mock_duration_minutes = 60
 if "mock_completed" not in st.session_state: st.session_state.mock_completed = False
+if "global_stats_log" not in st.session_state: st.session_state.global_stats_log = []
+if "mock_scores" not in st.session_state: st.session_state.mock_scores = []
+if "my_flashcards" not in st.session_state: st.session_state.my_flashcards = []
+if "db_loaded_for" not in st.session_state: st.session_state.db_loaded_for = None
 
 # =========================================================
 # 🧭 5. แผงควบคุมด้านข้าง (Sidebar)
@@ -167,7 +215,7 @@ with st.sidebar:
     st.title("🌿 Ghibli Control")
     current_user = st.text_input("👤 ชื่อผู้ใช้งาน (User Name):", value="Nathan").strip()
 
-if "db_loaded_for" not in st.session_state or st.session_state.db_loaded_for != current_user:
+if st.session_state.db_loaded_for != current_user:
     with st.spinner(f"☁️ กำลังซิงค์แฟ้มประวัติของ {current_user} จาก BigQuery..."):
         s_stats, s_mocks, s_cards = fetch_user_data(current_user)
         st.session_state.global_stats_log = s_stats
