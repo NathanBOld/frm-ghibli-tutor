@@ -36,6 +36,7 @@ st.markdown("""
     .badge-text-outside { color: #4A3E3D; font-size: 0.90rem; line-height: 1.4; }
     .badge-level { font-weight: 600; font-size: 1.2rem; color: #DAA520; margin-bottom: 4px;}
     .badge-title { font-weight: 600; font-size: 1.05rem; color: #4A3E3D; }
+    .stars-display { margin-top: 15px; text-align: center; font-size: 1.2rem; min-height: 25px; color: #DAA520;}
     </style>
 """, unsafe_allow_html=True)
 
@@ -55,7 +56,7 @@ else:
 ai_client = genai.Client(api_key=GEMINI_API_KEY)
 
 # =========================================================
-# 🗄️ 3. ฟังก์ชันฐานข้อมูล (ใช้ Load Jobs เพื่อผ่านข้อจำกัด Free Tier)
+# 🗄️ 3. ฟังก์ชันฐานข้อมูล 
 # =========================================================
 @st.cache_resource(show_spinner=False)
 def ensure_db_tables_exist():
@@ -71,6 +72,7 @@ def ensure_db_tables_exist():
     schema_fc = [
         bigquery.SchemaField("username", "STRING"), bigquery.SchemaField("front", "STRING"), 
         bigquery.SchemaField("back", "STRING"), bigquery.SchemaField("timestamp", "FLOAT"),
+        bigquery.SchemaField("streak", "INTEGER") # เพิ่มคอลัมน์เก็บดาว
     ]
     bq_client.create_table(bigquery.Table(dataset_ref.table("flashcards"), schema=schema_fc), exists_ok=True)
     
@@ -100,11 +102,41 @@ def push_mock_to_db(mock_log):
 
 def push_flashcard_to_db(fc):
     try:
-        rows = [{"username": fc["user"], "front": fc["front"], "back": fc["back"], "timestamp": time.time()}]
-        job_config = bigquery.LoadJobConfig(write_disposition=bigquery.WriteDisposition.WRITE_APPEND)
+        rows = [{"username": fc["user"], "front": fc["front"], "back": fc["back"], "timestamp": time.time(), "streak": 0}]
+        schema = [
+            bigquery.SchemaField("username", "STRING"), bigquery.SchemaField("front", "STRING"), 
+            bigquery.SchemaField("back", "STRING"), bigquery.SchemaField("timestamp", "FLOAT"),
+            bigquery.SchemaField("streak", "INTEGER")
+        ]
+        # อนุญาตให้เพิ่มคอลัมน์ streak อัตโนมัติหากตารางเก่ายังไม่มี
+        job_config = bigquery.LoadJobConfig(write_disposition=bigquery.WriteDisposition.WRITE_APPEND, schema=schema, schema_update_options=[bigquery.SchemaUpdateOption.ALLOW_FIELD_ADDITION])
         job = bq_client.load_table_from_json(rows, "frm-ai-tutor.FRM_DATASET.flashcards", job_config=job_config)
         job.result()
     except Exception as e: st.error(f"❌ บันทึก Flashcard ไม่สำเร็จ: {e}")
+
+def update_flashcard_streak_in_db(fc, new_streak):
+    try:
+        query = "SELECT * FROM `frm-ai-tutor.FRM_DATASET.flashcards`"
+        rows = bq_client.query(query).result()
+        
+        updated_rows = []
+        for r in rows:
+            streak_val = r.streak if 'streak' in r.keys() and r.streak is not None else 0
+            if r.username == fc.get("user") and r.front == fc.get("front") and r.back == fc.get("back"):
+                updated_rows.append({"username": r.username, "front": r.front, "back": r.back, "timestamp": r.timestamp, "streak": new_streak})
+            else:
+                updated_rows.append({"username": r.username, "front": r.front, "back": r.back, "timestamp": r.timestamp, "streak": streak_val})
+        
+        if updated_rows:
+            schema = [
+                bigquery.SchemaField("username", "STRING"), bigquery.SchemaField("front", "STRING"), 
+                bigquery.SchemaField("back", "STRING"), bigquery.SchemaField("timestamp", "FLOAT"),
+                bigquery.SchemaField("streak", "INTEGER")
+            ]
+            job_config = bigquery.LoadJobConfig(write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE, schema=schema)
+            job = bq_client.load_table_from_json(updated_rows, "frm-ai-tutor.FRM_DATASET.flashcards", job_config=job_config)
+            job.result()
+    except Exception as e: st.error(f"❌ อัปเดตดาว Flashcard ไม่สำเร็จ: {e}")
 
 def delete_flashcard_from_db(fc):
     try:
@@ -113,13 +145,15 @@ def delete_flashcard_from_db(fc):
         
         kept_rows = []
         for r in rows:
+            streak_val = r.streak if 'streak' in r.keys() and r.streak is not None else 0
             if not (r.username == fc.get("user") and r.front == fc.get("front") and r.back == fc.get("back")):
-                kept_rows.append({"username": r.username, "front": r.front, "back": r.back, "timestamp": r.timestamp})
+                kept_rows.append({"username": r.username, "front": r.front, "back": r.back, "timestamp": r.timestamp, "streak": streak_val})
         
         if kept_rows:
             schema = [
                 bigquery.SchemaField("username", "STRING"), bigquery.SchemaField("front", "STRING"), 
-                bigquery.SchemaField("back", "STRING"), bigquery.SchemaField("timestamp", "FLOAT")
+                bigquery.SchemaField("back", "STRING"), bigquery.SchemaField("timestamp", "FLOAT"),
+                bigquery.SchemaField("streak", "INTEGER")
             ]
             job_config = bigquery.LoadJobConfig(write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE, schema=schema)
             job = bq_client.load_table_from_json(kept_rows, "frm-ai-tutor.FRM_DATASET.flashcards", job_config=job_config)
@@ -127,7 +161,7 @@ def delete_flashcard_from_db(fc):
         else:
             ddl = """
                 CREATE OR REPLACE TABLE `frm-ai-tutor.FRM_DATASET.flashcards`
-                (username STRING, front STRING, back STRING, timestamp FLOAT64)
+                (username STRING, front STRING, back STRING, timestamp FLOAT64, streak INT64)
             """
             bq_client.query(ddl).result()
     except Exception as e: st.error(f"❌ ลบ Flashcard ไม่สำเร็จ: {e}")
@@ -144,7 +178,8 @@ def fetch_user_data(username):
         mocks = [{"user": r.user_name, "score": r.score, "timestamp": r.timestamp} for r in m_rows]
         
         c_rows = bq_client.query("SELECT * FROM `frm-ai-tutor.FRM_DATASET.flashcards` WHERE username = @u", job_config=cfg).result()
-        cards = [{"user": r.username, "front": r.front, "back": r.back} for r in c_rows]
+        # เช็คว่ามีคอลัมน์ streak หรือไม่ ถ้าไม่มีให้เป็น 0
+        cards = [{"user": r.username, "front": r.front, "back": r.back, "streak": r.streak if 'streak' in r.keys() and r.streak is not None else 0} for r in c_rows]
     except Exception as e: st.error(f"❌ ดึงข้อมูลจากฐานข้อมูลไม่สำเร็จ: {e}")
     return stats, mocks, cards
 
@@ -167,7 +202,7 @@ def load_global_questions():
 global_pool = load_global_questions()
 
 # =========================================================
-# ⚙️ 4. บริหารกลไกตัวแปรระบบหลัก (เพิ่มป้องกัน KeyError)
+# ⚙️ 4. บริหารกลไกตัวแปรระบบหลัก 
 # =========================================================
 if "practice_idx" not in st.session_state: st.session_state.practice_idx = 0
 if "practice_submitted" not in st.session_state: st.session_state.practice_submitted = False
@@ -181,6 +216,9 @@ if "global_stats_log" not in st.session_state: st.session_state.global_stats_log
 if "mock_scores" not in st.session_state: st.session_state.mock_scores = []
 if "my_flashcards" not in st.session_state: st.session_state.my_flashcards = []
 if "db_loaded_for" not in st.session_state: st.session_state.db_loaded_for = None
+# ตัวแปรสำหรับ Memory Test
+if "mem_test_idx" not in st.session_state: st.session_state.mem_test_idx = 0
+if "mem_test_feedback" not in st.session_state: st.session_state.mem_test_feedback = None
 
 # =========================================================
 # 🧭 5. แผงควบคุมด้านข้าง (Sidebar)
@@ -238,7 +276,7 @@ with st.sidebar:
         st.caption("🎮 เริ่มต้นทำโจทย์ข้อแรกเพื่อปลดล็อกเกียรติยศจ้า...")
 
     st.markdown("---")
-    app_mode = st.radio("เลือกพื้นที่ทำงาน (Menu):", ["📝 Practice Mode", "⏱️ Mock Exam Simulator", "📊 Performance & AI Insights", "🗂️ Flashcard Studio"])
+    app_mode = st.radio("เลือกพื้นที่ทำงาน (Menu):", ["📝 Practice Mode", "⏱️ Mock Exam Simulator", "📊 Performance & AI Insights", "🧠 Memory Test", "🗂️ Flashcard Studio"])
 
     st.markdown("---")
     st.header("✨ สร้าง Flashcard ด่วน")
@@ -249,7 +287,7 @@ with st.sidebar:
         
         if submitted:
             if sb_front.strip() and sb_back.strip():
-                new_card = {"user": current_user, "front": sb_front.strip(), "back": sb_back.strip()}
+                new_card = {"user": current_user, "front": sb_front.strip(), "back": sb_back.strip(), "streak": 0}
                 st.session_state.my_flashcards.append(new_card)
                 push_flashcard_to_db(new_card)
                 st.toast("บันทึกการ์ดลงฐานข้อมูลเรียบร้อยจ้า! 🌰")
@@ -424,19 +462,18 @@ else:
                 st.session_state.mock_questions, st.session_state.mock_user_answers, st.session_state.mock_completed = [], {}, False
                 st.rerun()
 
-# =========================================================
+    # =========================================================
     # 📊 หน้าที่ 3: Performance Dashboard
     # =========================================================
     elif app_mode == "📊 Performance & AI Insights":
         st.header(f"📊 Performance Dashboard (ผู้ใช้งานปัจจุบัน: {current_user})")
         
-        # 🔍 กรองดึงมาเฉพาะข้อมูลที่มาจากการสอบ Mock Exam (recorded_id ต้องขึ้นต้นด้วย "M_")
+        # 🔍 กรองดึงมาเฉพาะข้อมูลที่มาจากการสอบ Mock Exam
         mock_history = [d for d in user_history if str(d.get("recorded_id", "")).startswith("M_")]
         
         if not mock_history: 
             st.info(f"🍃 ยังไม่มีประวัติการสอบ Mock Exam ของ {current_user} จ้า ลองเข้าไปจำลองสอบที่โหมด Mock Exam Simulator ดูก่อนน้า")
         else:
-            # ใช้เฉพาะข้อมูล mock_history มาคำนวณกราฟและตาราง
             df = pd.DataFrame(mock_history).sort_values(by="timestamp").reset_index(drop=True)
             summary_df = df.groupby('book')['is_correct'].agg(['count', 'sum']).reset_index()
             summary_df.columns = ['Book', 'Total Questions', 'Correct Answers']
@@ -467,7 +504,6 @@ else:
                 
             with col_graph2:
                 st.markdown("#### 📈 Mock Exam Session Progress")
-                # กราฟนี้ใช้ data จากตาราง mock_scores โดยตรง ซึ่งเป็นของ Mock Exam อยู่แล้ว
                 user_mocks = [m for m in st.session_state.mock_scores if m["user"] == current_user]
                 if not user_mocks: 
                     st.info("🍃 กราฟนี้จะโชว์เมื่อคุณทำโหมด Mock Exam จบ 1 ครั้งขึ้นไปจ้า")
@@ -486,16 +522,90 @@ else:
                     try:
                         res = ai_client.models.generate_content(
                             model='gemini-3.1-flash-lite', 
-                            # ระบุให้ AI รู้ว่านี่คือผลจากการสอบ Mock Exam
                             contents=f"USER: {current_user}. MOCK EXAM STATS:\n{stats_text}\nAnalyze weak areas based ONLY on these mock exam results. Give warm risk-practitioner advice in Thai. End with 'ครับจ้า'."
                         )
                         st.markdown('<div class="tool-card">', unsafe_allow_html=True)
                         st.markdown(f"### 📜 รายงานวิเคราะห์สำหรับ {current_user}"); st.write(res.text)
                         st.markdown('</div>', unsafe_allow_html=True)
-                    except: 
-                        st.error("ระบบ AI ขัดข้องชั่วคราวจ้า")
+                    except: st.error("ระบบ AI ขัดข้องชั่วคราวจ้า")
+
     # =========================================================
-    # 🗂️ หน้าที่ 4: Flashcard Studio 
+    # 🧠 หน้าที่ 4: Memory Test (ทดสอบความจำ) 
+    # =========================================================
+    elif app_mode == "🧠 Memory Test":
+        st.header(f"🧠 Memory Test (ผู้ใช้งานปัจจุบัน: {current_user})")
+        st.caption("พิมพ์คำตอบให้ตรงกับด้านหลังการ์ดเพื่อสะสมดาวทอง 5 ดวง เมื่อสะสมครบการ์ดจะสำเร็จการศึกษาและไม่โผล่มากวนใจอีก! 🎓")
+        
+        user_cards = [c for c in st.session_state.my_flashcards if isinstance(c, dict) and c.get("user") == current_user]
+        
+        # คัดมาเฉพาะใบที่ท่องจำยังไม่ครบ 5 ดาว
+        test_pool = [c for c in user_cards if c.get("streak", 0) < 5]
+        
+        if not test_pool:
+            if user_cards:
+                st.success("🎉 ยอดเยี่ยมมาก! คุณจำ Flashcard ได้ครบทุกใบแล้ว (ได้ดาวครบ 5 ดวงทุกใบ)")
+                st.balloons()
+            else:
+                st.info("🍃 คุณยังไม่มี Flashcard ในคลังเลยจ้า ลองเพิ่มที่แถบเมนูด้านซ้ายดูก่อนน้า")
+        else:
+            # ตรวจสอบว่ามี Feedback (ผลลัพธ์จากข้อที่แล้ว) ค้างอยู่ไหม
+            if st.session_state.mem_test_feedback:
+                if st.session_state.mem_test_feedback["status"] == "correct":
+                    st.success(st.session_state.mem_test_feedback["msg"])
+                    if st.session_state.mem_test_feedback["streak"] >= 5:
+                        st.balloons()
+                else:
+                    st.error("❌ ยังไม่ถูกจ้า! โดนริบดาวกลับไปเหลือ 0 เลย")
+                    st.info(f"💡 เฉลยที่แท้จริงคือ: **{st.session_state.mem_test_feedback['ans']}**")
+                
+                # ปุ่มหยุดพักเพื่ออ่านเฉลยก่อนไปต่อ
+                if st.button("⏭️ สุ่มการ์ดใบถัดไป (Next)"):
+                    st.session_state.mem_test_feedback = None
+                    st.session_state.mem_test_idx = random.randint(0, max(0, len(test_pool) - 1))
+                    st.rerun()
+            
+            else:
+                # สุ่ม Index การ์ด
+                if st.session_state.mem_test_idx >= len(test_pool):
+                    st.session_state.mem_test_idx = random.randint(0, len(test_pool) - 1)
+                
+                current_card = test_pool[st.session_state.mem_test_idx]
+                
+                st.markdown("---")
+                st.markdown(f"### 📇 ด้านหน้า: **{current_card['front']}**")
+                st.markdown(f"<div class='stars-display'>🌟 ดาวที่สะสมได้: {'⭐' * current_card.get('streak', 0)} ({current_card.get('streak', 0)}/5)</div>", unsafe_allow_html=True)
+                
+                user_answer = st.text_input("✍️ พิมพ์ข้อความด้านหลังการ์ดให้ตรงเป๊ะ:", key="mem_input")
+                
+                if st.button("🔍 ตรวจคำตอบ"):
+                    # ตรวจคำตอบแบบไม่สนใจพิมพ์เล็ก/ใหญ่ และเว้นวรรคส่วนเกิน
+                    is_correct = user_answer.strip().lower() == current_card['back'].strip().lower()
+                    
+                    if is_correct:
+                        new_streak = current_card.get("streak", 0) + 1
+                        msg = f"✅ ถูกต้อง! สะสมดาวได้ {new_streak}/5 ⭐" if new_streak < 5 else "🌟 ยอดเยี่ยม! การ์ดใบนี้สำเร็จการศึกษาและจะไม่ถูกสุ่มมาอีก!"
+                        
+                        # อัปเดตดาวในระบบ Session และนำส่งไป BigQuery
+                        for c in st.session_state.my_flashcards:
+                            if c["front"] == current_card["front"] and c["back"] == current_card["back"]:
+                                c["streak"] = new_streak
+                        update_flashcard_streak_in_db(current_card, new_streak)
+                        
+                        # บันทึกสถานะไปโชว์ในรอบ Rerun ถัดไป
+                        st.session_state.mem_test_feedback = {"status": "correct", "msg": msg, "streak": new_streak}
+                    else:
+                        # รีเซ็ตดาวกลับเป็น 0
+                        for c in st.session_state.my_flashcards:
+                            if c["front"] == current_card["front"] and c["back"] == current_card["back"]:
+                                c["streak"] = 0
+                        update_flashcard_streak_in_db(current_card, 0)
+                        
+                        st.session_state.mem_test_feedback = {"status": "wrong", "ans": current_card['back']}
+                    
+                    st.rerun()
+
+    # =========================================================
+    # 🗂️ หน้าที่ 5: Flashcard Studio 
     # =========================================================
     elif app_mode == "🗂️ Flashcard Studio":
         st.header(f"🗂️ Flashcard Studio ({current_user})")
@@ -511,7 +621,19 @@ else:
                 cols = st.columns(3)
                 for j, c in enumerate(user_cards[i:i+3]):
                     with cols[j]:
-                        st.markdown(f'<div class="fc-card"><div class="fc-front">{c.get("front","")}</div><hr class="fc-divider"><div class="fc-back">{c.get("back","")}</div></div>', unsafe_allow_html=True)
+                        # แสดงผลดาวที่สะสมด้านล่างการ์ด
+                        streak_stars = "⭐" * c.get("streak", 0)
+                        if c.get("streak", 0) >= 5:
+                            streak_stars = "🌟 สำเร็จการศึกษา 🌟"
+                            
+                        st.markdown(f'''
+                            <div class="fc-card">
+                                <div class="fc-front">{c.get("front","")}</div>
+                                <hr class="fc-divider">
+                                <div class="fc-back">{c.get("back","")}</div>
+                                <div class="stars-display">{streak_stars}</div>
+                            </div>
+                        ''', unsafe_allow_html=True)
                         
                         st.markdown('<div class="btn-delete">', unsafe_allow_html=True)
                         if st.button("🗑️ ลบการ์ดใบนี้", key=f"del_{i}_{j}_{c.get('front','')[:5]}"):
