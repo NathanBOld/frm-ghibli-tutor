@@ -424,19 +424,25 @@ else:
                 st.session_state.mock_questions, st.session_state.mock_user_answers, st.session_state.mock_completed = [], {}, False
                 st.rerun()
 
-    # =========================================================
+# =========================================================
     # 📊 หน้าที่ 3: Performance Dashboard
     # =========================================================
     elif app_mode == "📊 Performance & AI Insights":
         st.header(f"📊 Performance Dashboard (ผู้ใช้งานปัจจุบัน: {current_user})")
-        if not user_history: st.info(f"🍃 ยังไม่มีข้อมูลของ {current_user} ในระบบฐานข้อมูลคลาวด์จ้า ลองฝึกทำข้อสอบก่อนน้า")
+        
+        # 🔍 กรองดึงมาเฉพาะข้อมูลที่มาจากการสอบ Mock Exam (recorded_id ต้องขึ้นต้นด้วย "M_")
+        mock_history = [d for d in user_history if str(d.get("recorded_id", "")).startswith("M_")]
+        
+        if not mock_history: 
+            st.info(f"🍃 ยังไม่มีประวัติการสอบ Mock Exam ของ {current_user} จ้า ลองเข้าไปจำลองสอบที่โหมด Mock Exam Simulator ดูก่อนน้า")
         else:
-            df = pd.DataFrame(user_history).sort_values(by="timestamp").reset_index(drop=True)
+            # ใช้เฉพาะข้อมูล mock_history มาคำนวณกราฟและตาราง
+            df = pd.DataFrame(mock_history).sort_values(by="timestamp").reset_index(drop=True)
             summary_df = df.groupby('book')['is_correct'].agg(['count', 'sum']).reset_index()
             summary_df.columns = ['Book', 'Total Questions', 'Correct Answers']
             summary_df['Accuracy (%)'] = (summary_df['Correct Answers'] / summary_df['Total Questions'] * 100).round(1)
             
-            st.subheader("📈 Summary Table")
+            st.subheader("📈 Summary Table (คำนวณจาก Mock Exam เท่านั้น)")
             st.dataframe(summary_df, use_container_width=True)
             
             col_graph1, col_graph2 = st.columns(2)
@@ -461,8 +467,10 @@ else:
                 
             with col_graph2:
                 st.markdown("#### 📈 Mock Exam Session Progress")
+                # กราฟนี้ใช้ data จากตาราง mock_scores โดยตรง ซึ่งเป็นของ Mock Exam อยู่แล้ว
                 user_mocks = [m for m in st.session_state.mock_scores if m["user"] == current_user]
-                if not user_mocks: st.info("🍃 กราฟนี้จะโชว์เมื่อคุณทำโหมด Mock Exam จบ 1 ครั้งขึ้นไปจ้า")
+                if not user_mocks: 
+                    st.info("🍃 กราฟนี้จะโชว์เมื่อคุณทำโหมด Mock Exam จบ 1 ครั้งขึ้นไปจ้า")
                 else:
                     df_mock = pd.DataFrame(user_mocks)
                     df_mock['Attempt'] = df_mock.index + 1
@@ -474,14 +482,18 @@ else:
             st.subheader("🧙‍♂️ AI Weakness Auditor")
             if st.button("✨ เจาะลึกแผนการอ่านหนังสือ (Generate AI Insights Report)"):
                 stats_text = "".join([f"- Book '{r['Book']}': Answered {r['Total Questions']}, Correct {r['Correct Answers']} (Accuracy: {r['Accuracy (%)']}%)\n" for i, r in summary_df.iterrows()])
-                with st.spinner("AI กำลังวิเคราะห์จุดอ่อนให้คุณ..."):
+                with st.spinner("AI กำลังวิเคราะห์จุดอ่อนจาก Mock Exam ให้คุณ..."):
                     try:
-                        res = ai_client.models.generate_content(model='gemini-3.1-flash-lite', contents=f"USER: {current_user}. STATS:\n{stats_text}\nAnalyze weak areas. Give warm risk-practitioner advice in Thai. End with 'ครับจ้า'.")
+                        res = ai_client.models.generate_content(
+                            model='gemini-3.1-flash-lite', 
+                            # ระบุให้ AI รู้ว่านี่คือผลจากการสอบ Mock Exam
+                            contents=f"USER: {current_user}. MOCK EXAM STATS:\n{stats_text}\nAnalyze weak areas based ONLY on these mock exam results. Give warm risk-practitioner advice in Thai. End with 'ครับจ้า'."
+                        )
                         st.markdown('<div class="tool-card">', unsafe_allow_html=True)
                         st.markdown(f"### 📜 รายงานวิเคราะห์สำหรับ {current_user}"); st.write(res.text)
                         st.markdown('</div>', unsafe_allow_html=True)
-                    except: st.error("ระบบ AI ขัดข้องชั่วคราวจ้า")
-
+                    except: 
+                        st.error("ระบบ AI ขัดข้องชั่วคราวจ้า")
     # =========================================================
     # 🗂️ หน้าที่ 4: Flashcard Studio 
     # =========================================================
