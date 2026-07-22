@@ -72,7 +72,7 @@ def ensure_db_tables_exist():
     schema_fc = [
         bigquery.SchemaField("username", "STRING"), bigquery.SchemaField("front", "STRING"), 
         bigquery.SchemaField("back", "STRING"), bigquery.SchemaField("timestamp", "FLOAT"),
-        bigquery.SchemaField("streak", "INTEGER") # เพิ่มคอลัมน์เก็บดาว
+        bigquery.SchemaField("streak", "INTEGER") 
     ]
     bq_client.create_table(bigquery.Table(dataset_ref.table("flashcards"), schema=schema_fc), exists_ok=True)
     
@@ -108,7 +108,6 @@ def push_flashcard_to_db(fc):
             bigquery.SchemaField("back", "STRING"), bigquery.SchemaField("timestamp", "FLOAT"),
             bigquery.SchemaField("streak", "INTEGER")
         ]
-        # อนุญาตให้เพิ่มคอลัมน์ streak อัตโนมัติหากตารางเก่ายังไม่มี
         job_config = bigquery.LoadJobConfig(write_disposition=bigquery.WriteDisposition.WRITE_APPEND, schema=schema, schema_update_options=[bigquery.SchemaUpdateOption.ALLOW_FIELD_ADDITION])
         job = bq_client.load_table_from_json(rows, "frm-ai-tutor.FRM_DATASET.flashcards", job_config=job_config)
         job.result()
@@ -178,7 +177,6 @@ def fetch_user_data(username):
         mocks = [{"user": r.user_name, "score": r.score, "timestamp": r.timestamp} for r in m_rows]
         
         c_rows = bq_client.query("SELECT * FROM `frm-ai-tutor.FRM_DATASET.flashcards` WHERE username = @u", job_config=cfg).result()
-        # เช็คว่ามีคอลัมน์ streak หรือไม่ ถ้าไม่มีให้เป็น 0
         cards = [{"user": r.username, "front": r.front, "back": r.back, "streak": r.streak if 'streak' in r.keys() and r.streak is not None else 0} for r in c_rows]
     except Exception as e: st.error(f"❌ ดึงข้อมูลจากฐานข้อมูลไม่สำเร็จ: {e}")
     return stats, mocks, cards
@@ -216,7 +214,6 @@ if "global_stats_log" not in st.session_state: st.session_state.global_stats_log
 if "mock_scores" not in st.session_state: st.session_state.mock_scores = []
 if "my_flashcards" not in st.session_state: st.session_state.my_flashcards = []
 if "db_loaded_for" not in st.session_state: st.session_state.db_loaded_for = None
-# ตัวแปรสำหรับ Memory Test
 if "mem_test_idx" not in st.session_state: st.session_state.mem_test_idx = 0
 if "mem_test_feedback" not in st.session_state: st.session_state.mem_test_feedback = None
 
@@ -366,9 +363,24 @@ else:
                 st.session_state.practice_chat.append({"role": "user", "text": c_input})
                 with st.spinner("AI กำลังเรียบเรียงคำตอบ..."):
                     try:
-                        res = ai_client.models.generate_content(model='gemini-3.1-flash-lite', contents=f"You are a warm FRM tutor. Question: {q['question_text']}. User asks: {c_input}. Answer warmly and concisely using 'ครับจ้า'")
+                        # 📝 ปรับ Prompt ใหม่ให้ตอบภาษาไทยได้ลื่นไหล และเปิดกว้างเรื่องหัวข้อนอกข้อสอบ
+                        prompt = f"""
+                        คุณคือ 'Ghibli Tutor' ติวเตอร์ FRM ที่เชี่ยวชาญ เป็นกันเอง และอธิบายเก่ง
+                        
+                        ข้อสอบที่ผู้ใช้กำลังทำอยู่ (เพื่อเป็นบริบทเผื่อผู้ใช้ถามถึง): 
+                        {q['question_text']}
+                        
+                        คำถามจากผู้ใช้: {c_input}
+                        
+                        คำสั่ง:
+                        1. ตอบคำถามของผู้ใช้เป็นภาษาไทยที่ถูกต้อง เป็นธรรมชาติ อ่านง่าย สละสลวย และเป็นมืออาชีพ (ใช้หางเสียง 'ครับ' อย่างเหมาะสม)
+                        2. หากผู้ใช้ถามเรื่องนอกเหนือจากข้อสอบ เช่น ความรู้การเงิน การวิเคราะห์ข้อมูล การบริหารความเสี่ยง หรือเรื่องทั่วไป ให้ตอบพูดคุยและให้คำแนะนำได้อย่างอิสระ ไม่ต้องตีกรอบแค่ในข้อสอบ
+                        3. อธิบายตรรกะหรือสูตรให้เข้าใจง่าย เหมาะสำหรับคนวัยทำงาน
+                        """
+                        res = ai_client.models.generate_content(model='gemini-3.1-flash-lite', contents=prompt)
                         st.session_state.practice_chat.append({"role": "model", "text": res.text})
-                    except: st.session_state.practice_chat.append({"role": "model", "text": "ขออภัยจ้า ระบบ AI ขัดข้องชั่วคราว"})
+                    except Exception as e: 
+                        st.session_state.practice_chat.append({"role": "model", "text": f"ขออภัยครับ ระบบ AI ขัดข้องชั่วคราว ({e})"})
                 st.rerun()
 
     # =========================================================
@@ -468,7 +480,6 @@ else:
     elif app_mode == "📊 Performance & AI Insights":
         st.header(f"📊 Performance Dashboard (ผู้ใช้งานปัจจุบัน: {current_user})")
         
-        # 🔍 กรองดึงมาเฉพาะข้อมูลที่มาจากการสอบ Mock Exam
         mock_history = [d for d in user_history if str(d.get("recorded_id", "")).startswith("M_")]
         
         if not mock_history: 
@@ -520,14 +531,26 @@ else:
                 stats_text = "".join([f"- Book '{r['Book']}': Answered {r['Total Questions']}, Correct {r['Correct Answers']} (Accuracy: {r['Accuracy (%)']}%)\n" for i, r in summary_df.iterrows()])
                 with st.spinner("AI กำลังวิเคราะห์จุดอ่อนจาก Mock Exam ให้คุณ..."):
                     try:
-                        res = ai_client.models.generate_content(
-                            model='gemini-3.1-flash-lite', 
-                            contents=f"USER: {current_user}. MOCK EXAM STATS:\n{stats_text}\nAnalyze weak areas based ONLY on these mock exam results. Give warm risk-practitioner advice in Thai. End with 'ครับจ้า'."
-                        )
+                        # 📝 ปรับ Prompt ใหม่ให้สรุปผลแบบเป็นมืออาชีพ เป็นธรรมชาติมากขึ้น 
+                        prompt = f"""
+                        คุณคือ 'Ghibli Tutor' ติวเตอร์ FRM สไตล์ให้กำลังใจและเชี่ยวชาญ
+                        
+                        ผู้ใช้งานชื่อ: {current_user}
+                        สถิติคะแนนสอบจำลอง (Mock Exam) ของผู้ใช้:
+                        {stats_text}
+                        
+                        คำสั่ง: 
+                        1. วิเคราะห์จุดอ่อนจากสถิติเหล่านี้ และให้คำแนะนำในการเตรียมตัวสอบที่นำไปใช้ได้จริง
+                        2. เขียนด้วยภาษาไทยที่เป็นธรรมชาติ สุภาพ เป็นมืออาชีพแต่เป็นกันเอง (ใช้หางเสียง 'ครับ')
+                        3. ชี้ให้เห็นถึงจุดที่ควรเน้นย้ำหรือทบทวนเพิ่มเติมอย่างตรงไปตรงมา
+                        """
+                        res = ai_client.models.generate_content(model='gemini-3.1-flash-lite', contents=prompt)
+                        
                         st.markdown('<div class="tool-card">', unsafe_allow_html=True)
                         st.markdown(f"### 📜 รายงานวิเคราะห์สำหรับ {current_user}"); st.write(res.text)
                         st.markdown('</div>', unsafe_allow_html=True)
-                    except: st.error("ระบบ AI ขัดข้องชั่วคราวจ้า")
+                    except Exception as e: 
+                        st.error(f"ระบบ AI ขัดข้องชั่วคราว: {e}")
 
     # =========================================================
     # 🧠 หน้าที่ 4: Memory Test (ทดสอบความจำ) 
@@ -538,7 +561,6 @@ else:
         
         user_cards = [c for c in st.session_state.my_flashcards if isinstance(c, dict) and c.get("user") == current_user]
         
-        # คัดมาเฉพาะใบที่ท่องจำยังไม่ครบ 5 ดาว
         test_pool = [c for c in user_cards if c.get("streak", 0) < 5]
         
         if not test_pool:
@@ -548,7 +570,6 @@ else:
             else:
                 st.info("🍃 คุณยังไม่มี Flashcard ในคลังเลยจ้า ลองเพิ่มที่แถบเมนูด้านซ้ายดูก่อนน้า")
         else:
-            # ตรวจสอบว่ามี Feedback (ผลลัพธ์จากข้อที่แล้ว) ค้างอยู่ไหม
             if st.session_state.mem_test_feedback:
                 if st.session_state.mem_test_feedback["status"] == "correct":
                     st.success(st.session_state.mem_test_feedback["msg"])
@@ -558,14 +579,12 @@ else:
                     st.error("❌ ยังไม่ถูกจ้า! โดนริบดาวกลับไปเหลือ 0 เลย")
                     st.info(f"💡 เฉลยที่แท้จริงคือ: **{st.session_state.mem_test_feedback['ans']}**")
                 
-                # ปุ่มหยุดพักเพื่ออ่านเฉลยก่อนไปต่อ
                 if st.button("⏭️ สุ่มการ์ดใบถัดไป (Next)"):
                     st.session_state.mem_test_feedback = None
                     st.session_state.mem_test_idx = random.randint(0, max(0, len(test_pool) - 1))
                     st.rerun()
             
             else:
-                # สุ่ม Index การ์ด
                 if st.session_state.mem_test_idx >= len(test_pool):
                     st.session_state.mem_test_idx = random.randint(0, len(test_pool) - 1)
                 
@@ -578,23 +597,19 @@ else:
                 user_answer = st.text_input("✍️ พิมพ์ข้อความด้านหลังการ์ดให้ตรงเป๊ะ:", key="mem_input")
                 
                 if st.button("🔍 ตรวจคำตอบ"):
-                    # ตรวจคำตอบแบบไม่สนใจพิมพ์เล็ก/ใหญ่ และเว้นวรรคส่วนเกิน
                     is_correct = user_answer.strip().lower() == current_card['back'].strip().lower()
                     
                     if is_correct:
                         new_streak = current_card.get("streak", 0) + 1
                         msg = f"✅ ถูกต้อง! สะสมดาวได้ {new_streak}/5 ⭐" if new_streak < 5 else "🌟 ยอดเยี่ยม! การ์ดใบนี้สำเร็จการศึกษาและจะไม่ถูกสุ่มมาอีก!"
                         
-                        # อัปเดตดาวในระบบ Session และนำส่งไป BigQuery
                         for c in st.session_state.my_flashcards:
                             if c["front"] == current_card["front"] and c["back"] == current_card["back"]:
                                 c["streak"] = new_streak
                         update_flashcard_streak_in_db(current_card, new_streak)
                         
-                        # บันทึกสถานะไปโชว์ในรอบ Rerun ถัดไป
                         st.session_state.mem_test_feedback = {"status": "correct", "msg": msg, "streak": new_streak}
                     else:
-                        # รีเซ็ตดาวกลับเป็น 0
                         for c in st.session_state.my_flashcards:
                             if c["front"] == current_card["front"] and c["back"] == current_card["back"]:
                                 c["streak"] = 0
@@ -621,7 +636,6 @@ else:
                 cols = st.columns(3)
                 for j, c in enumerate(user_cards[i:i+3]):
                     with cols[j]:
-                        # แสดงผลดาวที่สะสมด้านล่างการ์ด
                         streak_stars = "⭐" * c.get("streak", 0)
                         if c.get("streak", 0) >= 5:
                             streak_stars = "🌟 สำเร็จการศึกษา 🌟"
