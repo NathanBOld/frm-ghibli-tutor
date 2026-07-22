@@ -239,20 +239,20 @@ overall_acc = (correct_q / total_q * 100) if total_q > 0 else 0
 
 with st.sidebar:
     if overall_acc >= 90 and total_q >= 10: 
-        gif_url = "https://media.giphy.com/media/W3Z9J4F3g5zgc/giphy.gif"
-        level_txt = "Level 5"; title = "จ้าวแห่งสวนสวรรค์"; desc = "Haku (Spirited Away)"
+        gif_url = "https://media.tenor.com/V2zX9qFpA3sAAAAi/capybara-hot-spring.gif"
+        level_txt = "Level 5"; title = "เทพเจ้าคาปิบาร่าแช่ออนเซ็น"; desc = "Ultimate Zen Master"
     elif overall_acc >= 75 and total_q >= 5: 
-        gif_url = "https://media.giphy.com/media/8hJcNuEAba0uI/giphy.gif"
-        level_txt = "Level 4"; title = "ผู้พิทักษ์ปราสาทลอยฟ้า"; desc = "Howl's Moving Castle"
+        gif_url = "https://i.pinimg.com/originals/5c/61/c2/5c61c28c8deeb722c1ef871b6d05cdb1.gif"
+        level_txt = "Level 4"; title = "ผู้พิทักษ์เพลิงเวทมนตร์"; desc = "Calcifer (Howl's Moving Castle)"
     elif overall_acc >= 60 and total_q >= 3: 
-        gif_url = "https://media.giphy.com/media/Kx82Lvb7wcYNO/giphy.gif"
+        gif_url = "https://i.pinimg.com/originals/fc/df/9f/fcdf9f95f4c5145b5cb4e8be5cc796fb.gif"
         level_txt = "Level 3"; title = "นักสำรวจเวทมนตร์"; desc = "Kiki's Delivery Service"
     elif overall_acc >= 40 and total_q > 0: 
-        gif_url = "https://media.giphy.com/media/11s7Ke7jcNxCHS/giphy.gif"
-        level_txt = "Level 2"; title = "นักบินฝึกหัด"; desc = "Totoro (My Neighbor Totoro)"
+        gif_url = "https://i.pinimg.com/originals/a0/0b/40/a00b40ebaa465cc7a884f1b80db266bf.gif"
+        level_txt = "Level 2"; title = "เพื่อนบ้านผู้พิทักษ์ป่า"; desc = "Totoro (My Neighbor Totoro)"
     elif total_q > 0: 
-        gif_url = "https://media.giphy.com/media/l4pTfx2qLszoacZRS/giphy.gif"
-        level_txt = "Level 1"; title = "ต้นกล้าแห่งความเพียร"; desc = "Soot Sprites (Spirited Away)"
+        gif_url = "https://i.pinimg.com/originals/3f/82/36/3f8236d390aeb35441d3b073b6e82643.gif"
+        level_txt = "Level 1"; title = "ภูตฝุ่นแห่งความเพียร"; desc = "Soot Sprites (Spirited Away)"
     else: 
         gif_url = None
 
