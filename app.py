@@ -239,20 +239,20 @@ overall_acc = (correct_q / total_q * 100) if total_q > 0 else 0
 
 with st.sidebar:
     if overall_acc >= 90 and total_q >= 10: 
-        gif_url = "https://media1.tenor.com/m/7H-O7G8a1YcAAAAC/the-cat-returns-baron.gif"
-        level_txt = "Level 5"; title = "จ้าวแห่งสวนสวรรค์"; desc = "The Baron (from The Cat Returns)"
+        gif_url = "https://media.giphy.com/media/W3Z9J4F3g5zgc/giphy.gif"
+        level_txt = "Level 5"; title = "จ้าวแห่งสวนสวรรค์"; desc = "Haku (Spirited Away)"
     elif overall_acc >= 75 and total_q >= 5: 
-        gif_url = "https://media1.tenor.com/m/W2hVn4E7dO0AAAAC/castle-in-the-sky-laputa.gif"
-        level_txt = "Level 4"; title = "ผู้พิทักษ์ปราสาทลอยฟ้า"; desc = "Guardian of the floating Castle (Laputa)"
+        gif_url = "https://media.giphy.com/media/8hJcNuEAba0uI/giphy.gif"
+        level_txt = "Level 4"; title = "ผู้พิทักษ์ปราสาทลอยฟ้า"; desc = "Howl's Moving Castle"
     elif overall_acc >= 60 and total_q >= 3: 
-        gif_url = "https://media1.tenor.com/m/0iI2O01C46EAAAAC/kiki-kikis-delivery-service.gif"
-        level_txt = "Level 3"; title = "นักสำรวจเวทมนตร์"; desc = "A young student of Magic"
+        gif_url = "https://media.giphy.com/media/Kx82Lvb7wcYNO/giphy.gif"
+        level_txt = "Level 3"; title = "นักสำรวจเวทมนตร์"; desc = "Kiki's Delivery Service"
     elif overall_acc >= 40 and total_q > 0: 
-        gif_url = "https://media1.tenor.com/m/R_Z1l4F7Cg8AAAAC/laputa-robot.gif"
-        level_txt = "Level 2"; title = "นักบินฝึกหัด"; desc = "Friendly Laputan robot | apprentice pilot"
+        gif_url = "https://media.giphy.com/media/11s7Ke7jcNxCHS/giphy.gif"
+        level_txt = "Level 2"; title = "นักบินฝึกหัด"; desc = "Totoro (My Neighbor Totoro)"
     elif total_q > 0: 
-        gif_url = "https://media1.tenor.com/m/qLh2P8-tYJcAAAAC/kodama-princess-mononoke.gif"
-        level_txt = "Level 1"; title = "ต้นกล้าแห่งความเพียร"; desc = "A tiny Kodama from Princess Mononoke"
+        gif_url = "https://media.giphy.com/media/l4pTfx2qLszoacZRS/giphy.gif"
+        level_txt = "Level 1"; title = "ต้นกล้าแห่งความเพียร"; desc = "Soot Sprites (Spirited Away)"
     else: 
         gif_url = None
 
