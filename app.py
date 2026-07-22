@@ -469,7 +469,7 @@ else:
         
         st.markdown("---")
         st.subheader("📚 แผง Flashcard ของคุณ")
-        user_cards = [c for c in st.session_state.my_flashcards if isinstance(c, dict) and c.get("user"] == current_user]
+        user_cards = [c for c in st.session_state.my_flashcards if isinstance(c, dict) and c.get("user") == current_user]
         
         if not user_cards: st.info("ยังไม่มีการ์ดในคลังจ้า ลองพิมพ์คำศัพท์หรือสูตรสร้างใบแรกที่แถบเครื่องมือด้านซ้ายมือดูสิ!")
         else:
