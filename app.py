@@ -222,7 +222,7 @@ if "mem_test_feedback" not in st.session_state: st.session_state.mem_test_feedba
 # =========================================================
 with st.sidebar:
     st.title("🌿 Ghibli Control")
-    current_user = st.text_input("👤 ชื่อผู้ใช้งาน (User Name):", value="Nathan").strip()
+    current_user = st.text_input("👤 ชื่อผู้ใช้งาน (User Name):", value="test").strip()
 
 if st.session_state.db_loaded_for != current_user:
     with st.spinner(f"☁️ กำลังซิงค์แฟ้มประวัติของ {current_user} จาก BigQuery..."):
