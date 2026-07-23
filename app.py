@@ -238,29 +238,29 @@ correct_q = sum([d["is_correct"] for d in user_history])
 overall_acc = (correct_q / total_q * 100) if total_q > 0 else 0
 
 with st.sidebar:
+    # ใช้ Emoji เป็นตัวแทนชั่วคราว (Fallback) ไปก่อนที่จะใส่รูปจริง
+    emoji_src = ""
     if overall_acc >= 90 and total_q >= 10: 
-        gif_url = "https://media.tenor.com/V2zX9qFpA3sAAAAi/capybara-hot-spring.gif"
-        level_txt = "Level 5"; title = "เทพเจ้าคาปิบาร่าแช่ออนเซ็น"; desc = "Ultimate Zen Master"
+        emoji_src = "♨️" # แทนคาปิบาร่าแช่ออนเซ็น
+        level_txt = "Level 5"; title = "เทพเจ้าออนเซ็น"; desc = "Ultimate Zen Master"
     elif overall_acc >= 75 and total_q >= 5: 
-        gif_url = "https://i.pinimg.com/originals/5c/61/c2/5c61c28c8deeb722c1ef871b6d05cdb1.gif"
-        level_txt = "Level 4"; title = "ผู้พิทักษ์เพลิงเวทมนตร์"; desc = "Calcifer (Howl's Moving Castle)"
+        emoji_src = "🔥" # แทนคาลซิเฟอร์
+        level_txt = "Level 4"; title = "ผู้พิทักษ์เพลิงเวทมนตร์"; desc = "Calcifer"
     elif overall_acc >= 60 and total_q >= 3: 
-        gif_url = "https://i.pinimg.com/originals/fc/df/9f/fcdf9f95f4c5145b5cb4e8be5cc796fb.gif"
-        level_txt = "Level 3"; title = "นักสำรวจเวทมนตร์"; desc = "Kiki's Delivery Service"
+        emoji_src = "🧹" # แทนกิกิ
+        level_txt = "Level 3"; title = "นักสำรวจเวทมนตร์"; desc = "Magic Delivery"
     elif overall_acc >= 40 and total_q > 0: 
-        gif_url = "https://i.pinimg.com/originals/a0/0b/40/a00b40ebaa465cc7a884f1b80db266bf.gif"
-        level_txt = "Level 2"; title = "เพื่อนบ้านผู้พิทักษ์ป่า"; desc = "Totoro (My Neighbor Totoro)"
+        emoji_src = "🍃" # แทนโทโทโร่
+        level_txt = "Level 2"; title = "เพื่อนบ้านผู้พิทักษ์ป่า"; desc = "Forest Guardian"
     elif total_q > 0: 
-        gif_url = "https://i.pinimg.com/originals/3f/82/36/3f8236d390aeb35441d3b073b6e82643.gif"
-        level_txt = "Level 1"; title = "ภูตฝุ่นแห่งความเพียร"; desc = "Soot Sprites (Spirited Away)"
-    else: 
-        gif_url = None
+        emoji_src = "🌑" # แทนภูตฝุ่น
+        level_txt = "Level 1"; title = "ภูตฝุ่นแห่งความเพียร"; desc = "Soot Sprites"
 
-    if gif_url:
+    if emoji_src:
         st.markdown(f'''
             <div class="gold-frame-container">
-                <div class="gold-frame">
-                    <img src="{gif_url}">
+                <div class="gold-frame" style="width: 150px; height: 150px; display: flex; align-items: center; justify-content: center; background-color: white; border: 3px solid #FFF8DC; border-radius: 50%; margin: 0 auto 15px auto;">
+                    <span style="font-size: 5rem;">{emoji_src}</span>
                 </div>
                 <div class="badge-text-outside">
                     <div class="badge-level">{level_txt}</div>
